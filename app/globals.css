@@ -2,46 +2,53 @@
 
 @theme inline {
   --color-background: #050a09;
-  --color-foreground: #f0f4f3;
+  --color-foreground: #111827;
   --color-brand: #1d9e75;
-  --color-brand-dim: #16755a;
-  --color-surface: #0d1a16;
-  --color-surface-2: #152620;
-  --color-muted: #6b8f82;
   --font-sans: var(--font-inter);
 }
 
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* ── Entrance ── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+/* ── Shield pulse rings ── */
+@keyframes ring-pulse {
+  0%   { transform: scale(1);   opacity: 0.5; }
+  100% { transform: scale(2.2); opacity: 0; }
 }
 
-.animate-fade-in-up {
-  animation: fade-in-up 0.35s ease-out forwards;
+/* ── Animated checkmark stroke ── */
+@keyframes check-draw {
+  from { stroke-dashoffset: 56; }
+  to   { stroke-dashoffset: 0; }
 }
 
-.animate-pulse-dot {
-  animation: pulse-dot 1.2s ease-in-out infinite;
+/* ── Success circle scale-in ── */
+@keyframes scale-in {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
 }
 
-* {
-  -webkit-tap-highlight-color: transparent;
+/* ── Step item fade in ── */
+@keyframes step-appear {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
+
+.animate-fade-up      { animation: fade-up 0.38s cubic-bezier(0.22,1,0.36,1) both; }
+.animate-ring-pulse   { animation: ring-pulse 2s ease-out infinite; }
+.animate-ring-pulse-2 { animation: ring-pulse 2s ease-out 0.7s infinite; }
+.animate-check-draw   { animation: check-draw 0.5s cubic-bezier(0.22,1,0.36,1) 0.15s both; }
+.animate-scale-in     { animation: scale-in 0.4s cubic-bezier(0.34,1.56,0.64,1) both; }
+.animate-step-appear  { animation: step-appear 0.3s ease-out both; }
+
+* { -webkit-tap-highlight-color: transparent; }
 
 body {
   background: #050a09;
-  color: #f0f4f3;
+  color: #111827;
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
