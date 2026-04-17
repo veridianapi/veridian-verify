@@ -2,6 +2,10 @@
 
 const API_BASE = "https://api.veridianapi.com/v1";
 
+function authHeader() {
+  return { Authorization: `Bearer ${process.env.VERIDIAN_API_KEY}` };
+}
+
 export type SessionData = {
   token: string;
   status: string;
@@ -22,6 +26,7 @@ export type VerificationResult = {
 export async function getSession(token: string): Promise<SessionData | null> {
   try {
     const res = await fetch(`${API_BASE}/sessions/${token}`, {
+      headers: { ...authHeader() },
       cache: "no-store",
     });
     if (!res.ok) return null;
@@ -38,7 +43,7 @@ export async function submitVerification(
   try {
     const res = await fetch(`${API_BASE}/verifications`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({
         session_token: token,
         document_front: payload.document_front,
