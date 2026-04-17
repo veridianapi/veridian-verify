@@ -41,22 +41,33 @@ export async function submitVerification(
   payload: VerificationPayload
 ): Promise<VerificationResult> {
   try {
+    const stripPrefix = (b64: string) =>
+      b64.includes(",") ? b64.split(",")[1] : b64;
+
     const res = await fetch(`${API_BASE}/verifications`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({
-        session_token: token,
-        document_front: payload.document_front,
-        selfie: payload.selfie,
         document_type: payload.document_type,
+        document_front: stripPrefix(payload.document_front),
+        selfie: stripPrefix(payload.selfie),
       }),
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+      const rawBody = await res.text().catch(() => "");
+      console.error(
+        `[veridian] POST /v1/verifications failed — status ${res.status}\n${rawBody}`
+      );
+      let message: string | undefined;
+      try {
+        message = (JSON.parse(rawBody) as { message?: string }).message;
+      } catch {
+        // non-JSON error body
+      }
       return {
         success: false,
-        error: body.message ?? "Verification failed. Please try again.",
+        error: message ?? "Verification failed. Please try again.",
       };
     }
 
