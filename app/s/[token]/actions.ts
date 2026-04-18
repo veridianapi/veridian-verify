@@ -14,8 +14,9 @@ export type SessionData = {
 
 export type VerificationPayload = {
   document_front: string;
+  document_back?: string;
   selfie: string;
-  document_type: "passport" | "driving_licence" | "national_id";
+  document_type: "passport" | "driving_licence" | "national_id" | "residence_permit";
 };
 
 export type VerificationResult = {
@@ -50,6 +51,7 @@ export async function submitVerification(
       body: JSON.stringify({
         document_type: payload.document_type,
         document_front: stripPrefix(payload.document_front),
+        ...(payload.document_back ? { document_back: stripPrefix(payload.document_back) } : {}),
         selfie: stripPrefix(payload.selfie),
       }),
     });
