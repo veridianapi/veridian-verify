@@ -56,6 +56,20 @@
 .animate-slide-fwd { animation: slide-fwd 0.25s ease-out both; }
 .animate-slide-bwd { animation: slide-bwd 0.25s ease-out both; }
 
+/* ── Spin (used via inline animation) ── */
+@keyframes spin { to { transform: rotate(360deg); } }
+/* ── Design system ── */
+@keyframes veridian-rotate { to { transform: rotate(360deg); } }
+@keyframes veridian-scan { 0%,100% { top: 25%; } 50% { top: 68%; } }
+@keyframes veridian-pulse-dot {
+  0%,100% { box-shadow: 0 0 0 4px rgba(15,110,86,0.35); }
+  50%      { box-shadow: 0 0 0 8px rgba(15,110,86,0.12); }
+}
+@keyframes veridian-hourglass {
+  0%,45%  { transform: rotate(0deg); }
+  55%,100%{ transform: rotate(180deg); }
+}
+
 * { -webkit-tap-highlight-color: transparent; }
 
 body {

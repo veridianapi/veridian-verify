@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(gunzip -c \"C:\\\\Users\\\\ME\\\\.claude\\\\projects\\\\c--Users-ME-veridian-verify\\\\c7c5502b-3af7-4bd6-b65e-5ab32134b071\\\\tool-results\\\\webfetch-1776556496206-zxq66g.bin\")",
+      "Bash(tar -x --to-stdout \"veridian-kyc-verify-flow/project/Veridian KYC Flow - Standalone.html\")",
+      "Bash(tar -t)",
+      "Bash(grep -v \"/$\")",
+      "Bash(tar -x --to-stdout \"veridian-kyc-verify-flow/project/screens.jsx\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\ME\\veridian-verify\\app\\s"
