@@ -235,13 +235,13 @@ function Btn({ onClick, disabled, loading, children, variant = "primary", small 
       color: disabled || loading ? "#9ca3af" : "#fff",
       boxShadow: disabled || loading ? "none" : `0 2px 12px ${BRAND_G}`,
     },
-    ghost: { background: SURFACE, color: INK_2, border: `1px solid ${BORDER}` },
+    ghost: { background: CARD, color: BRAND, border: `1.5px solid ${BRAND}` },
     danger: { background: DANGER_L, color: DANGER, border: `1px solid #fca5a5` },
   };
   return (
     <button type="button" onClick={onClick} disabled={disabled || loading}
       style={{
-        width: "100%", minHeight: h, borderRadius: R,
+        width: "100%", minHeight: h, borderRadius: 9999,
         border: "none", cursor: disabled || loading ? "not-allowed" : "pointer",
         fontWeight: 600, fontSize: 15, display: "flex",
         alignItems: "center", justifyContent: "center", gap: 8,
@@ -445,7 +445,7 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   return (
     <div className={className} style={{
       background: CARD, borderRadius: 20,
-      boxShadow: "0 4px 32px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
+      boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
       overflow: "hidden",
     }}>
       {children}
@@ -573,104 +573,121 @@ function DocTypeRow({ label, meta, badge, selected, onClick }: {
   );
 }
 
-// ─── SCREEN: Entry (Desktop QR / SMS handoff) ─────────────────────────────────
-function EntryScreen({ token, onContinue }: { token: string; onContinue: () => void }) {
-  const url = `https://verify.veridianapi.com/s/${token}`;
-  const [phone, setPhone] = useState("");
-  const [smsState, setSmsState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+// ─── SCREEN: Entry (Desktop QR handoff) ──────────────────────────────────────
+function EntryScreen({ token: _token, onContinue }: { token: string; onContinue: () => void }) {
+  const [pageUrl, setPageUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { setPageUrl(window.location.href); }, []);
 
-  const handleSend = async () => {
-    if (!phone.trim()) return;
-    setSmsState("sending");
-    await delay(1100); // simulate API
-    setSmsState("sent");
+  const qrSrc = pageUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pageUrl)}`
+    : "";
+
+  const handleCopy = () => {
+    if (!pageUrl) return;
+    navigator.clipboard?.writeText(pageUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   return (
     <div className="animate-fade-up" style={{ padding: "0 20px 32px" }}>
-      <Card>
-        <div style={{ padding: "28px 24px 24px" }}>
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <ShieldHero />
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: -0.4, marginTop: 16, marginBottom: 8 }}>
-              Use your phone for the best experience
-            </h1>
-            <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.55, maxWidth: 300, margin: "0 auto" }}>
-              Your phone&apos;s camera gives the clearest document photos. Scan the QR code or get a link by SMS.
-            </p>
+      <div style={{
+        background: "#0d1a14", borderRadius: 20,
+        boxShadow: "0 4px 24px rgba(0,0,0,0.35)",
+        overflow: "hidden",
+      }}>
+        <div style={{ padding: "36px 28px 32px", textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+            <VeridianMark size={44} />
           </div>
-
-          {/* QR Code */}
-          <div style={{
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
-            padding: "20px 16px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}`,
-            marginBottom: 20,
+          <h1 style={{
+            fontSize: 26, fontWeight: 700, color: "#fff", letterSpacing: -0.4,
+            margin: "0 0 12px",
           }}>
-            <FakeQRCode size={150} />
-            <div style={{ fontFamily: MONO, fontSize: 11, color: INK_3, letterSpacing: 0.3, textAlign: "center" }}>
-              Point your camera at this code
-            </div>
+            Open on your phone
+          </h1>
+          <p style={{
+            fontSize: 14, color: "rgba(255,255,255,0.55)", lineHeight: 1.6,
+            margin: "0 0 28px", maxWidth: 280, marginLeft: "auto", marginRight: "auto",
+          }}>
+            Camera is required for verification. Scan this code with your phone camera.
+          </p>
+
+          <div style={{
+            display: "inline-flex", padding: 16,
+            background: "#fff", borderRadius: 16,
+            boxShadow: "0 2px 16px rgba(0,0,0,0.18)",
+            marginBottom: 24,
+          }}>
+            {qrSrc ? (
+              <img src={qrSrc} alt="Verification QR code" width={200} height={200}
+                style={{ display: "block", borderRadius: 8 }} />
+            ) : (
+              <div style={{
+                width: 200, height: 200, borderRadius: 8,
+                background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg style={{ animation: "spin 0.9s linear infinite" }} width="28" height="28" viewBox="0 0 28 28" fill="none">
+                  <circle cx="14" cy="14" r="11" stroke="#e5e7eb" strokeWidth="2.5" />
+                  <path d="M14 3a11 11 0 0 1 11 11" stroke={BRAND} strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+              </div>
+            )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-            <div style={{ flex: 1, height: 1, background: BORDER }} />
-            <span style={{ fontSize: 12, color: INK_4, fontWeight: 500 }}>or send a link</span>
-            <div style={{ flex: 1, height: 1, background: BORDER }} />
-          </div>
-
-          {/* SMS input */}
-          {smsState === "sent" ? (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 10,
-              padding: "13px 16px", borderRadius: R,
-              background: OK_L, border: `1px solid #6ee7b7`,
+          <div style={{ marginBottom: 28 }}>
+            <button type="button" onClick={handleCopy} style={{
+              all: "unset", cursor: "pointer", boxSizing: "border-box",
+              display: "inline-flex", alignItems: "center", gap: 8,
+              padding: "10px 24px", borderRadius: 9999,
+              border: "1.5px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.07)",
+              fontSize: 13, fontWeight: 600,
+              color: copied ? "#4ade80" : "rgba(255,255,255,0.75)",
+              transition: "all 0.15s",
             }}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <circle cx="9" cy="9" r="8" fill={OK} />
-                <path d="M5 9l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#065f46" }}>Link sent to {phone}</span>
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 8 }}>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)}
-                placeholder="+1 (555) 000-0000" type="tel"
-                style={{
-                  flex: 1, minHeight: BTN_H, borderRadius: R,
-                  border: `1.5px solid ${BORDER}`, padding: "0 14px",
-                  fontSize: 15, outline: "none", background: SURFACE,
-                  color: INK,
-                }}
-                onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              />
-              <button type="button" onClick={handleSend}
-                disabled={!phone.trim() || smsState === "sending"}
-                style={{
-                  minHeight: BTN_H, minWidth: 76, borderRadius: R,
-                  border: "none", background: phone.trim() ? BRAND : "#d1d5db",
-                  color: phone.trim() ? "#fff" : "#9ca3af",
-                  fontWeight: 600, fontSize: 14, cursor: phone.trim() ? "pointer" : "not-allowed",
-                }}>
-                {smsState === "sending" ? "…" : "Send"}
-              </button>
-            </div>
-          )}
-        </div>
-        <Divider />
-        <div style={{ padding: "16px 24px 20px" }}>
-          <Btn variant="ghost" onClick={onContinue}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="2" y="3" width="12" height="10" rx="1.5" stroke={INK_3} strokeWidth="1.5" />
-              <circle cx="6" cy="7" r="1" fill={INK_3} />
-              <path d="M2 10l3-3 3 3 2-2 4 4" stroke={INK_3} strokeWidth="1.3" strokeLinejoin="round" />
-            </svg>
-            Continue on this device
-          </Btn>
-          <p style={{ fontSize: 11, color: INK_4, textAlign: "center", marginTop: 10 }}>
-            Camera upload required — quality may vary on desktop
+              {copied ? (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M2 7l3.5 3.5L12 3" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <rect x="4" y="1.5" width="7.5" height="9.5" rx="1" stroke="rgba(255,255,255,0.6)" strokeWidth="1.3" />
+                    <rect x="2" y="3" width="7.5" height="9.5" rx="1" stroke="rgba(255,255,255,0.6)" strokeWidth="1.3" fill="rgba(255,255,255,0.07)" />
+                  </svg>
+                  Or copy link
+                </>
+              )}
+            </button>
+          </div>
+
+          <p style={{
+            fontFamily: MONO, fontSize: 10, color: "rgba(255,255,255,0.2)",
+            letterSpacing: 0.5, margin: 0,
+          }}>
+            Secured by Veridian · End-to-end encrypted
           </p>
         </div>
-      </Card>
+
+        <div style={{ padding: "0 28px 28px" }}>
+          <button type="button" onClick={onContinue} style={{
+            all: "unset", cursor: "pointer", boxSizing: "border-box",
+            width: "100%", minHeight: BTN_H, borderRadius: 9999,
+            border: "1.5px solid rgba(255,255,255,0.15)",
+            background: "rgba(255,255,255,0.06)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.45)",
+          }}>
+            Continue on this device
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -682,32 +699,51 @@ function WelcomeScreen({ onNext }: { onNext: () => void }) {
       <Card>
         <div style={{ padding: "32px 24px 24px" }}>
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
-            <ShieldHero />
+            <div style={{ position: "relative", width: 80, height: 80, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{
+                position: "absolute", width: 80, height: 80, borderRadius: "50%",
+                background: BRAND, opacity: 0.06,
+                animation: "ring-pulse 3s ease-out infinite",
+              }} />
+              <span style={{
+                position: "absolute", width: 80, height: 80, borderRadius: "50%",
+                background: BRAND, opacity: 0.04,
+                animation: "ring-pulse 3s ease-out 1s infinite",
+              }} />
+              <div style={{
+                width: 60, height: 60, borderRadius: 18,
+                background: BRAND_L, border: `1.5px solid ${BRAND_G}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <VeridianMark size={30} />
+              </div>
+            </div>
           </div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: INK, letterSpacing: -0.5, textAlign: "center", margin: "0 0 8px" }}>
+          <h1 style={{
+            fontSize: 28, fontWeight: 400, color: INK, letterSpacing: -0.5,
+            textAlign: "center", margin: "0 0 8px",
+            fontFamily: 'var(--font-serif,"Instrument Serif",Georgia,serif)',
+          }}>
             Verify your identity
           </h1>
           <p style={{ fontSize: 14, color: INK_3, textAlign: "center", lineHeight: 1.6, margin: "0 0 28px" }}>
             Quick and secure. Takes about 2 minutes.
           </p>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 28 }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 28 }}>
             {[
-              { n: 1, title: "Select your document", desc: "Passport, driving licence, or national ID" },
-              { n: 2, title: "Take a photo",          desc: "Clear shot of the front (and back if required)" },
-              { n: 3, title: "Take a selfie",          desc: "Live photo to match against your document" },
-            ].map(({ n, title, desc }) => (
-              <div key={n} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-                <div style={{
-                  width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
-                  background: BRAND_L, border: `1.5px solid ${BRAND_G}`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 13, fontWeight: 700, color: BRAND, fontFamily: MONO,
-                }}>{n}</div>
-                <div>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: INK, margin: 0 }}>{title}</p>
-                  <p style={{ fontSize: 12, color: INK_3, margin: "3px 0 0", lineHeight: 1.45 }}>{desc}</p>
-                </div>
+              { emoji: "📄", label: "Your ID document" },
+              { emoji: "🤳", label: "A quick selfie" },
+              { emoji: "⏱", label: "About 2 minutes" },
+            ].map(({ emoji, label }) => (
+              <div key={label} style={{
+                flex: 1, background: SURFACE, borderRadius: 12,
+                border: `1px solid ${BORDER}`,
+                padding: "14px 8px", textAlign: "center",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+              }}>
+                <span style={{ fontSize: 24 }}>{emoji}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: INK_2, lineHeight: 1.3 }}>{label}</span>
               </div>
             ))}
           </div>
@@ -870,8 +906,8 @@ function LiveCam({ facing, overlay, onCapture, onDenied }: {
 }
 
 // ─── Upload fallback (camera denied) ─────────────────────────────────────────
-function UploadFallback({ label, onFile, token, onQR }: {
-  label: string; onFile: (dataUrl: string) => void; token: string; onQR?: () => void;
+function UploadFallback({ label, onFile }: {
+  label: string; onFile: (dataUrl: string) => void;
 }) {
   const camRef = useRef<HTMLInputElement>(null);
   const libRef = useRef<HTMLInputElement>(null);
@@ -913,17 +949,6 @@ function UploadFallback({ label, onFile, token, onQR }: {
         </svg>
         Choose from library
       </Btn>
-      {onQR && (
-        <Btn variant="ghost" onClick={onQR}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="2" width="5" height="5" rx="0.5" stroke={INK_3} strokeWidth="1.4" />
-            <rect x="9" y="2" width="5" height="5" rx="0.5" stroke={INK_3} strokeWidth="1.4" />
-            <rect x="2" y="9" width="5" height="5" rx="0.5" stroke={INK_3} strokeWidth="1.4" />
-            <rect x="11" y="11" width="3" height="3" fill={INK_3} />
-          </svg>
-          Use another device (QR)
-        </Btn>
-      )}
     </div>
   );
 }
@@ -998,17 +1023,16 @@ function QRFlowScreen({ token, onBack }: { token: string; onBack: () => void }) 
 }
 
 // ─── SCREEN: DocCapture ───────────────────────────────────────────────────────
-function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onBack: onBackDoc, onBack2, token }: {
+function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onBack: onBackDoc, onBack2 }: {
   docLabel: string; docTypeVal: DocType; hasBack: boolean; country: Country | null;
   onFront: (front: string, frontQ: string | null) => void;
   onBack2: (back: string, backQ: string | null) => void;
-  onBack: () => void; token: string;
+  onBack: () => void;
 }) {
   const [phase, setPhase] = useState<CapturePhase>("front-cam");
   const [frontImg, setFrontImg] = useState<string | null>(null);
   const [frontQ, setFrontQ] = useState<string | null>(null);
   const [camDenied, setCamDenied] = useState(false);
-  const [showQR, setShowQR] = useState(false);
   const [camKey, setCamKey] = useState(0);
   const libRef = useRef<HTMLInputElement>(null);
 
@@ -1028,8 +1052,6 @@ function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onB
     if (phase === "front-cam") await handleCaptureFront(dataUrl);
     else if (phase === "back-cam") await handleCaptureBack(dataUrl);
   };
-
-  if (showQR) return <QRFlowScreen token={token} onBack={() => setShowQR(false)} />;
 
   // Front camera
   if (phase === "front-cam") {
@@ -1052,8 +1074,6 @@ function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onB
             <UploadFallback
               label={docLabel.toLowerCase()}
               onFile={handleCaptureFront}
-              token={token}
-              onQR={() => setShowQR(true)}
             />
           ) : (
             <LiveCam
@@ -1064,12 +1084,6 @@ function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onB
               onDenied={() => setCamDenied(true)}
             />
           )}
-          <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center" }}>
-            <button type="button" onClick={() => setShowQR(true)} style={{
-              all: "unset", cursor: "pointer",
-              fontSize: 12, color: BRAND, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3,
-            }}>Use another device</button>
-          </div>
         </Card>
       </div>
     );
@@ -1112,7 +1126,7 @@ function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onB
             </p>
           </div>
           {camDenied ? (
-            <UploadFallback label={`back of ${docLabel.toLowerCase()}`} onFile={handleCaptureBack} token={token} />
+            <UploadFallback label={`back of ${docLabel.toLowerCase()}`} onFile={handleCaptureBack} />
           ) : (
             <LiveCam
               key={`back-${camKey}`}
@@ -1161,14 +1175,13 @@ async function checkImageQuality(dataUrl: string): Promise<string | null> {
 }
 
 // ─── SCREEN: Selfie ────────────────────────────────────────────────────────────
-function SelfieScreen({ image, onCapture, onClear, onSubmit, onBack, submitting, token }: {
+function SelfieScreen({ image, onCapture, onClear, onSubmit, onBack, submitting }: {
   image: string | null; onCapture: (d: string) => void; onClear: () => void;
-  onSubmit: () => void; onBack: () => void; submitting: boolean; token: string;
+  onSubmit: () => void; onBack: () => void; submitting: boolean;
 }) {
   const [camDenied, setCamDenied] = useState(false);
   const [selfieQ, setSelfieQ] = useState<string | null>(null);
   const [camKey, setCamKey] = useState(0);
-  const [showQR, setShowQR] = useState(false);
   const libRef = useRef<HTMLInputElement>(null);
 
   const handleCapture = async (dataUrl: string) => {
@@ -1177,8 +1190,6 @@ function SelfieScreen({ image, onCapture, onClear, onSubmit, onBack, submitting,
   };
 
   const retake = () => { setSelfieQ(null); onClear(); setCamKey((k) => k + 1); };
-
-  if (showQR) return <QRFlowScreen token={token} onBack={() => setShowQR(false)} />;
 
   if (image) {
     return (
@@ -1212,10 +1223,7 @@ function SelfieScreen({ image, onCapture, onClear, onSubmit, onBack, submitting,
           </p>
         </div>
         {camDenied ? (
-          <>
-            <input ref={libRef} type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; await handleCapture(await fileToDataUrl(f)); e.target.value = ""; }} style={{ display: "none" }} />
-            <UploadFallback label="selfie" onFile={handleCapture} token={token} onQR={() => setShowQR(true)} />
-          </>
+          <UploadFallback label="selfie" onFile={handleCapture} />
         ) : (
           <LiveCam
             key={camKey}
@@ -1224,14 +1232,6 @@ function SelfieScreen({ image, onCapture, onClear, onSubmit, onBack, submitting,
             onCapture={handleCapture}
             onDenied={() => setCamDenied(true)}
           />
-        )}
-        {!camDenied && (
-          <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center" }}>
-            <button type="button" onClick={() => setShowQR(true)} style={{
-              all: "unset", cursor: "pointer",
-              fontSize: 12, color: BRAND, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3,
-            }}>Use another device</button>
-          </div>
         )}
       </Card>
     </div>
@@ -1279,20 +1279,20 @@ function ProcessingScreen({ step }: { step: number }) {
                   animation: active ? "step-appear 0.25s ease-out both" : "none",
                 }}>
                   <div style={{
-                    width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                    width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
                     background: done ? BRAND : active ? BRAND_L : SURFACE,
                     border: active ? `2px solid ${BRAND}` : done ? "none" : `1.5px solid ${BORDER}`,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     transition: "all 0.3s",
                   }}>
                     {done ? (
-                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                      <svg width="15" height="15" viewBox="0 0 13 13" fill="none">
                         <path d="M2 6.5l3 3 6-6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     ) : active ? (
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: BRAND, animation: "ring-pulse 1.4s ease-out infinite" }} />
+                      <div style={{ width: 10, height: 10, borderRadius: "50%", background: BRAND, animation: "ring-pulse 1.4s ease-out infinite" }} />
                     ) : (
-                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: BORDER }} />
+                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: BORDER }} />
                     )}
                   </div>
                   <div style={{ flex: 1 }}>
@@ -1337,40 +1337,34 @@ function ResultScreen({ result, onRetry }: { result: VerificationResult; onRetry
         <div style={{ padding: "40px 24px 32px", textAlign: "center" }}>
           {result.success ? (
             <>
-              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-                <div className="animate-scale-in" style={{ width: 84, height: 84 }}>
-                  <svg width="84" height="84" viewBox="0 0 84 84" fill="none">
-                    <circle cx="42" cy="42" r="38" fill={BRAND_L} />
-                    <circle cx="42" cy="42" r="34" stroke={BRAND} strokeWidth="2.5" />
+              <div style={{
+                background: "linear-gradient(135deg, #0f6e56 0%, #0a5c46 100%)",
+                margin: "-40px -24px 28px",
+                padding: "36px 24px 32px",
+                display: "flex", justifyContent: "center",
+              }}>
+                <div className="animate-scale-in" style={{ width: 96, height: 96 }}>
+                  <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+                    <circle cx="48" cy="48" r="44" fill="rgba(255,255,255,0.15)" />
+                    <circle cx="48" cy="48" r="40" stroke="rgba(255,255,255,0.5)" strokeWidth="2" />
                     <path
-                      d="M26 42l11 11 21-22"
-                      stroke={BRAND} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"
-                      strokeDasharray="54" strokeDashoffset="54"
+                      d="M30 48l13 13 23-25"
+                      stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"
+                      strokeDasharray="58" strokeDashoffset="58"
                       className="animate-check-draw"
                     />
                   </svg>
                 </div>
               </div>
-              <h2 style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
-                Verification submitted
-              </h2>
-              <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 24px" }}>
-                You can safely close this window.<br />
-                We&apos;ll notify the business once your identity is confirmed.
-              </p>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "13px 16px", borderRadius: R, background: OK_L,
-                border: `1px solid #6ee7b7`, textAlign: "left",
+              <h2 style={{
+                fontSize: 26, fontWeight: 400, color: INK, letterSpacing: -0.4, margin: "0 0 10px",
+                fontFamily: 'var(--font-serif,"Instrument Serif",Georgia,serif)',
               }}>
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
-                  <circle cx="9" cy="9" r="8" fill={OK} />
-                  <path d="M5 9l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: "#065f46", margin: 0 }}>Processing typically completes in under 60 seconds</p>
-                </div>
-              </div>
+                Verification complete
+              </h2>
+              <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: 0 }}>
+                You can close this window.
+              </p>
             </>
           ) : (
             <>
@@ -1389,7 +1383,12 @@ function ResultScreen({ result, onRetry }: { result: VerificationResult; onRetry
               <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 24px" }}>
                 {result.error ?? "Something went wrong. Please try again."}
               </p>
-              <Btn onClick={onRetry} variant="danger">Try again</Btn>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <Btn onClick={onRetry}>Try again</Btn>
+                <a href="mailto:support@veridianapi.com" style={{ all: "unset" }}>
+                  <Btn variant="ghost">Contact support</Btn>
+                </a>
+              </div>
             </>
           )}
         </div>
@@ -1505,7 +1504,6 @@ export function VerificationFlow({ token }: { token: string }) {
           onFront={handleFrontCaptured}
           onBack2={handleBackCaptured}
           onBack={() => go("doc-select", "backward")}
-          token={token}
         />
       );
     }
@@ -1519,7 +1517,6 @@ export function VerificationFlow({ token }: { token: string }) {
           onSubmit={handleSubmit}
           onBack={() => go("doc-capture", "backward")}
           submitting={submitting}
-          token={token}
         />
       );
     }
