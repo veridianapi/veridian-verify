@@ -1,32 +1,44 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { submitVerification, type VerificationResult } from "./actions";
 
-// ─── Design tokens (matching screens.jsx) ────────────────────────────────────
-const TEAL       = "#0f6e56";
-const TEAL_DEEP  = "#0a4d3c";
-const TEAL_SOFT  = "rgba(15,110,86,0.10)";
-const TEAL_TINT  = "#e8f3ef";
-const TEAL_GLOW  = "rgba(15,110,86,0.35)";
-const INK        = "#0f1615";
-const INK_2      = "#4a5553";
-const INK_3      = "#8a938f";
-const LINE       = "rgba(15,22,21,0.08)";
-const PAPER      = "#faf8f3";
-const PAPER_SHADE = "#f1ede3";
-const CORAL      = "#d97757";
+// ─── Design Tokens ────────────────────────────────────────────────────────────
+const BG      = "#050a09";
+const CARD    = "#ffffff";
+const BRAND   = "#0f6e56";
+const BRAND_D = "#0a5c46";
+const BRAND_L = "rgba(15,110,86,0.08)";
+const BRAND_G = "rgba(15,110,86,0.20)";
+const INK     = "#111827";
+const INK_2   = "#374151";
+const INK_3   = "#6b7280";
+const INK_4   = "#9ca3af";
+const BORDER  = "#e5e7eb";
+const SURFACE = "#f9fafb";
+const DANGER  = "#ef4444";
+const DANGER_L = "#fef2f2";
+const WARN    = "#f59e0b";
+const WARN_L  = "#fffbeb";
+const OK      = "#10b981";
+const OK_L    = "#f0fdf4";
 
-const SERIF = 'var(--font-serif,"Instrument Serif","Playfair Display",Georgia,serif)';
-const MONO  = 'var(--font-mono,"JetBrains Mono","SF Mono",ui-monospace,monospace)';
+const MONO = 'var(--font-mono,"JetBrains Mono","SF Mono",ui-monospace,monospace)';
+const BTN_H = 44;
+const R     = 10; // base border-radius
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type FlowStep = "doc-select" | "doc-method" | "doc-front" | "doc-back" | "selfie" | "processing";
-type Direction = "forward" | "backward";
-type DocType   = "passport" | "national_id" | "driving_licence" | "residence_permit";
+type FlowStep   = "detecting" | "entry" | "welcome" | "doc-select" | "doc-capture" | "selfie" | "processing" | "result";
+type Direction  = "forward" | "backward";
+type DocType    = "passport" | "national_id" | "driving_licence" | "residence_permit";
+type CapturePhase = "front-cam" | "front-preview" | "back-cam" | "back-preview";
+type CamStatus  = "starting" | "live" | "denied";
 
 interface Country { code: string; name: string; flag: string }
+interface FrameQuality { brightness: number; variance: number }
+interface Chip { text: string; ok: boolean; warn?: boolean }
 
+// ─── Data ────────────────────────────────────────────────────────────────────
 const COUNTRIES: Country[] = [
   { code: "ET", name: "Ethiopia",       flag: "🇪🇹" },
   { code: "KE", name: "Kenya",          flag: "🇰🇪" },
@@ -41,15 +53,15 @@ const COUNTRIES: Country[] = [
 ];
 
 const DOC_TYPES: { value: DocType; label: string; meta: string; hasBack: boolean }[] = [
-  { value: "passport",         label: "Passport",         meta: "Fastest · photo page only", hasBack: false },
-  { value: "driving_licence",  label: "Driving licence",  meta: "Front and back",             hasBack: true  },
-  { value: "national_id",      label: "National ID",      meta: "Front and back",             hasBack: true  },
-  { value: "residence_permit", label: "Residence permit", meta: "Front only",                 hasBack: false },
+  { value: "passport",         label: "Passport",         meta: "Photo page only",  hasBack: false },
+  { value: "driving_licence",  label: "Driving licence",  meta: "Front and back",   hasBack: true  },
+  { value: "national_id",      label: "National ID",      meta: "Front and back",   hasBack: true  },
+  { value: "residence_permit", label: "Residence permit", meta: "Front only",       hasBack: false },
 ];
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const stripPrefix = (s: string) => (s.includes(",") ? s.split(",")[1] : s);
+const stripPfx = (s: string) => (s.includes(",") ? s.split(",")[1] : s);
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -60,63 +72,310 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-async function checkQuality(dataUrl: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const w = Math.min(img.width, 100), h = Math.min(img.height, 100);
-        const cv = document.createElement("canvas");
-        cv.width = w; cv.height = h;
-        const ctx = cv.getContext("2d");
-        if (!ctx) { resolve(null); return; }
-        ctx.drawImage(img, 0, 0, w, h);
-        const d = ctx.getImageData(0, 0, w, h).data;
-        let sum = 0;
-        for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
-        resolve(sum / (d.length / 4) < 45 ? "Image appears too dark — try in better lighting." : null);
-      } catch { resolve(null); }
-    };
-    img.onerror = () => resolve(null);
-    img.src = dataUrl;
-  });
+function analyzeFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): FrameQuality | null {
+  if (video.videoWidth === 0) return null;
+  const w = 80, h = 45;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let sum = 0, sumSq = 0, n = d.length / 4;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    sum += lum;
+    sumSq += lum * lum;
+  }
+  const avg = sum / n;
+  return { brightness: avg, variance: sumSq / n - avg * avg };
 }
 
-// ─── Brand mark ──────────────────────────────────────────────────────────────
-function VeridianMark({ size = 20, color = TEAL }: { size?: number; color?: string }) {
+function qualityChips(q: FrameQuality | null, isSelfie = false): Chip[] {
+  if (!q) return [{ text: "Checking camera…", ok: false, warn: true }];
+  const chips: Chip[] = [];
+  if (q.brightness < 35)       chips.push({ text: "Too dark — add light", ok: false });
+  else if (q.brightness > 215) chips.push({ text: "Too bright — reduce light", ok: false, warn: true });
+  else                          chips.push({ text: "Lighting good", ok: true });
+  if (q.variance < 180)         chips.push({ text: "Hold still", ok: false, warn: true });
+  if (isSelfie && q.variance > 180 && q.brightness >= 35 && q.brightness <= 215)
+    chips.push({ text: "Ready to capture", ok: true });
+  return chips;
+}
+
+// ─── Hooks ───────────────────────────────────────────────────────────────────
+function useCamera(facing: "environment" | "user") {
+  const [status, setStatus] = useState<CamStatus>("starting");
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (!navigator?.mediaDevices?.getUserMedia) { setStatus("denied"); return; }
+    let cancelled = false;
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 960 } },
+      audio: false,
+    }).then((stream) => {
+      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+      streamRef.current = stream;
+      const v = videoRef.current;
+      if (v) { v.srcObject = stream; v.play().catch(() => { if (!cancelled) setStatus("denied"); }); }
+      setStatus("live");
+    }).catch(() => { if (!cancelled) setStatus("denied"); });
+    return () => { cancelled = true; streamRef.current?.getTracks().forEach((t) => t.stop()); };
+  }, [facing]);
+
+  const capture = useCallback((): string | null => {
+    const v = videoRef.current, c = canvasRef.current;
+    if (!v || !c) return null;
+    c.width = v.videoWidth || 640; c.height = v.videoHeight || 480;
+    c.getContext("2d")?.drawImage(v, 0, 0, c.width, c.height);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    return c.toDataURL("image/jpeg", 0.88);
+  }, []);
+
+  const stop = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+  }, []);
+
+  return { status, videoRef, canvasRef, capture, stop };
+}
+
+function useFrameQuality(videoRef: React.RefObject<HTMLVideoElement | null>, active: boolean) {
+  const [quality, setQuality] = useState<FrameQuality | null>(null);
+  const cvRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!active) { setQuality(null); return; }
+    if (!cvRef.current) cvRef.current = document.createElement("canvas");
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (!v || !cvRef.current) return;
+      const q = analyzeFrame(v, cvRef.current);
+      if (q) setQuality(q);
+    }, 600);
+    return () => clearInterval(id);
+  }, [active, videoRef]);
+
+  return quality;
+}
+
+// ─── FakeQR ───────────────────────────────────────────────────────────────────
+function FakeQRCode({ size = 160 }: { size?: number }) {
+  const N = 21, c = size / N;
+  const inFinder = (x: number, y: number, ox: number, oy: number) => {
+    const lx = x - ox, ly = y - oy;
+    if (lx < 0 || lx > 6 || ly < 0 || ly > 6) return false;
+    return lx === 0 || lx === 6 || ly === 0 || ly === 6 || (lx >= 2 && lx <= 4 && ly >= 2 && ly <= 4);
+  };
+  const inZone = (x: number, y: number) =>
+    (x <= 7 && y <= 7) || (x >= 13 && y <= 7) || (x <= 7 && y >= 13);
+  const cells: { x: number; y: number }[] = [];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let fill = false;
+    if (inFinder(x, y, 0, 0) || inFinder(x, y, 14, 0) || inFinder(x, y, 0, 14)) fill = true;
+    else if (!inZone(x, y)) {
+      if (x === 6 || y === 6) fill = (x + y) % 2 === 0;
+      else fill = (x * 7 + y * 11 + x * y * 3) % 5 < 2;
+    }
+    if (fill) cells.push({ x, y });
+  }
   return (
-    <svg width={size} height={Math.round(size * 1.1)} viewBox="0 0 28 31" fill="none" aria-hidden="true">
-      <path d="M14 1 L26 5 V15 C26 22.5 20.7 27.7 14 30 C7.3 27.7 2 22.5 2 15 V5 L14 1 Z" fill={color} />
-      <path d="M8 12 L14 22 L20 12" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ borderRadius: 8, display: "block" }}>
+      <rect width={size} height={size} fill="white" />
+      {cells.map(({ x, y }) => (
+        <rect key={`${x}-${y}`} x={x * c} y={y * c} width={c - 0.5} height={c - 0.5} fill={INK} />
+      ))}
     </svg>
   );
 }
 
-// ─── TopBar ──────────────────────────────────────────────────────────────────
-function TopBar({ onBack, dark = false }: { onBack?: () => void; dark?: boolean }) {
-  const btnBg = dark ? "rgba(255,255,255,0.12)" : "rgba(15,22,21,0.04)";
-  const stroke = dark ? "#fff" : INK;
-  const textColor = dark ? "#fff" : INK;
+// ─── Primitive UI ─────────────────────────────────────────────────────────────
+function VeridianMark({ size = 22 }: { size?: number }) {
   return (
-    <div style={{ padding: "8px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      {onBack ? (
-        <button type="button" onClick={onBack} aria-label="Go back" style={{
-          all: "unset", cursor: "pointer",
-          width: 40, height: 40, borderRadius: 999,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: btnBg,
-        }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M8 2L3 7L8 12" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      ) : <div style={{ width: 40 }} />}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <VeridianMark size={18} color={dark ? "#fff" : TEAL} />
-        <span style={{ fontWeight: 600, fontSize: 14, color: textColor, letterSpacing: -0.1 }}>Veridian</span>
+    <svg width={size} height={Math.round(size * 1.1)} viewBox="0 0 28 31" fill="none" aria-hidden="true">
+      <path d="M14 1L26 5V15C26 22.5 20.7 27.7 14 30C7.3 27.7 2 22.5 2 15V5L14 1Z" fill={BRAND} />
+      <path d="M8 12L14 22L20 12" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
+
+function ShieldHero() {
+  return (
+    <div style={{ position: "relative", width: 88, height: 88, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <span style={{
+        position: "absolute", width: 88, height: 88, borderRadius: "50%",
+        background: BRAND, opacity: 0.06,
+        animation: "ring-pulse 2s ease-out infinite",
+      }} />
+      <span style={{
+        position: "absolute", width: 88, height: 88, borderRadius: "50%",
+        background: BRAND, opacity: 0.04,
+        animation: "ring-pulse 2s ease-out 0.7s infinite",
+      }} />
+      <div style={{
+        width: 64, height: 64, borderRadius: 20,
+        background: BRAND_L, border: `1.5px solid ${BRAND_G}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <VeridianMark size={32} />
       </div>
-      <div style={{ width: 40 }} />
     </div>
+  );
+}
+
+function Btn({ onClick, disabled, loading, children, variant = "primary", small }: {
+  onClick?: () => void; disabled?: boolean; loading?: boolean;
+  children?: React.ReactNode; variant?: "primary" | "ghost" | "danger"; small?: boolean;
+}) {
+  const h = small ? 38 : BTN_H;
+  const styles: Record<string, React.CSSProperties> = {
+    primary: {
+      background: disabled || loading ? "#d1d5db" : BRAND,
+      color: disabled || loading ? "#9ca3af" : "#fff",
+      boxShadow: disabled || loading ? "none" : `0 2px 12px ${BRAND_G}`,
+    },
+    ghost: { background: SURFACE, color: INK_2, border: `1px solid ${BORDER}` },
+    danger: { background: DANGER_L, color: DANGER, border: `1px solid #fca5a5` },
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={disabled || loading}
+      style={{
+        width: "100%", minHeight: h, borderRadius: R,
+        border: "none", cursor: disabled || loading ? "not-allowed" : "pointer",
+        fontWeight: 600, fontSize: 15, display: "flex",
+        alignItems: "center", justifyContent: "center", gap: 8,
+        transition: "opacity 0.15s, transform 0.1s",
+        ...styles[variant],
+      }}>
+      {loading ? (
+        <svg style={{ animation: "spin 0.9s linear infinite" }} width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <circle cx="9" cy="9" r="7" stroke="rgba(255,255,255,0.35)" strokeWidth="2.5" />
+          <path d="M9 2a7 7 0 0 1 7 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+      ) : children}
+    </button>
+  );
+}
+
+function BackBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-label="Back"
+      style={{
+        all: "unset", cursor: "pointer",
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 13, fontWeight: 600, color: INK_3,
+        marginBottom: 20,
+      }}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      Back
+    </button>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: 1, background: BORDER, margin: "16px 0" }} />;
+}
+
+function Tag({ children, ok, warn }: { children: React.ReactNode; ok?: boolean; warn?: boolean }) {
+  const bg = ok ? OK_L : warn ? WARN_L : DANGER_L;
+  const color = ok ? "#065f46" : warn ? "#78350f" : "#991b1b";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: "4px 10px", borderRadius: 999,
+      background: bg, color, fontFamily: MONO, fontSize: 11, fontWeight: 500,
+      letterSpacing: 0.2, whiteSpace: "nowrap",
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: "50%",
+        background: ok ? OK : warn ? WARN : DANGER,
+        flexShrink: 0,
+      }} />
+      {children}
+    </span>
+  );
+}
+
+function QualityBar({ chips }: { chips: Chip[] }) {
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+      {chips.map((c, i) => <Tag key={i} ok={c.ok} warn={c.warn}>{c.text}</Tag>)}
+    </div>
+  );
+}
+
+function CaptureFlash({ visible }: { visible: boolean }) {
+  return (
+    <div style={{
+      position: "absolute", inset: 0, borderRadius: "inherit",
+      background: "#fff", opacity: visible ? 1 : 0, pointerEvents: "none",
+      transition: visible ? "none" : "opacity 0.25s ease-out",
+      zIndex: 30,
+    }} />
+  );
+}
+
+// ─── Camera Document Overlay ──────────────────────────────────────────────────
+function DocOverlay({ isPassport }: { isPassport: boolean }) {
+  const rW = isPassport ? 0.62 : 0.84;
+  const rH = isPassport ? 0.68 : 0.52;
+  const vW = 300, vH = 420;
+  const x0 = (vW * (1 - rW)) / 2, y0 = (vH * (1 - rH)) / 2;
+  const w  = vW * rW,            h  = vH * rH;
+  const br = 12, bl = 24;
+
+  // Build the vignette path: outer rect minus rounded inner rect (even-odd fill rule)
+  const roundedRect = (x: number, y: number, rw: number, rh: number, r: number) =>
+    `M${x + r},${y} h${rw - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${rh - 2 * r} a${r},${r} 0 0 1 -${r},${r} h${-(rw - 2 * r)} a${r},${r} 0 0 1 -${r},-${r} v${-(rh - 2 * r)} a${r},${r} 0 0 1 ${r},-${r} Z`;
+
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${vW} ${vH}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      {/* Vignette with hole cut out using even-odd fill */}
+      <path
+        fillRule="evenodd"
+        fill="rgba(0,0,0,0.52)"
+        d={`M0,0 h${vW} v${vH} h${-vW} Z ${roundedRect(x0, y0, w, h, br)}`}
+      />
+      {/* Dashed border */}
+      <rect x={x0} y={y0} width={w} height={h} rx={br}
+        fill="none" stroke={BRAND} strokeWidth="1.5" strokeDasharray="8 5" />
+      {/* Corner brackets */}
+      {[
+        [x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h],
+      ].map(([cx, cy], i) => {
+        const sx = i % 2 === 0 ? 1 : -1;
+        const sy = i < 2 ? 1 : -1;
+        return (
+          <path key={i}
+            d={`M${cx + sx * bl} ${cy} L${cx} ${cy} L${cx} ${cy + sy * bl}`}
+            stroke={BRAND} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── Oval Face Overlay ────────────────────────────────────────────────────────
+function FaceOverlay() {
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <mask id="face-mask">
+          <rect width="300" height="400" fill="white" />
+          <ellipse cx="150" cy="188" rx="104" ry="132" fill="black" />
+        </mask>
+      </defs>
+      <rect width="300" height="400" fill="rgba(0,0,0,0.50)" mask="url(#face-mask)" />
+      <ellipse cx="150" cy="188" rx="104" ry="132" fill="none" stroke={BRAND} strokeWidth="2" strokeDasharray="8 5" />
+      {/* Corner brackets */}
+      <path d="M62 56 L46 56 L46 72"  stroke={BRAND} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M238 56 L254 56 L254 72" stroke={BRAND} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M62 320 L46 320 L46 304" stroke={BRAND} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M238 320 L254 320 L254 304" stroke={BRAND} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -125,24 +384,23 @@ const RAIL_LABELS = ["Document", "Capture", "Selfie", "Review"];
 
 function ProgressRail({ step }: { step: 0 | 1 | 2 | 3 }) {
   return (
-    <div style={{ padding: "0 20px 4px" }}>
-      <div style={{ display: "flex", gap: 6 }}>
+    <div style={{ padding: "12px 20px 0" }}>
+      <div style={{ display: "flex", gap: 5 }}>
         {RAIL_LABELS.map((_, i) => (
           <div key={i} style={{
             flex: 1, height: 3, borderRadius: 2,
-            background: i <= step ? TEAL : "rgba(15,22,21,0.08)",
+            background: i <= step ? BRAND : "rgba(255,255,255,0.10)",
+            transition: "background 0.3s",
           }} />
         ))}
       </div>
       <div style={{
-        display: "flex", justifyContent: "space-between",
-        marginTop: 10,
-        fontFamily: MONO, fontSize: 9, letterSpacing: 0.6,
-        textTransform: "uppercase",
+        display: "flex", justifyContent: "space-between", marginTop: 8,
+        fontFamily: MONO, fontSize: 9, letterSpacing: 0.8, textTransform: "uppercase",
       }}>
         {RAIL_LABELS.map((l, i) => (
           <span key={i} style={{
-            color: i === step ? TEAL : i < step ? INK_2 : INK_3,
+            color: i === step ? BRAND : i < step ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.2)",
             fontWeight: i === step ? 600 : 400,
           }}>{l}</span>
         ))}
@@ -151,46 +409,51 @@ function ProgressRail({ step }: { step: 0 | 1 | 2 | 3 }) {
   );
 }
 
-// ─── Document type icons ─────────────────────────────────────────────────────
-function DocIcon({ kind }: { kind: DocType }) {
-  const sw = 1.7;
-  if (kind === "passport") return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <rect x="5" y="2" width="14" height="20" rx="1.5" stroke={TEAL_DEEP} strokeWidth={sw} />
-      <circle cx="12" cy="10" r="3" stroke={TEAL_DEEP} strokeWidth={sw} />
-      <line x1="8" y1="16" x2="16" y2="16" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-      <line x1="9" y1="19" x2="15" y2="19" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-    </svg>
-  );
-  if (kind === "driving_licence") return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <rect x="2" y="5" width="20" height="14" rx="2" stroke={TEAL_DEEP} strokeWidth={sw} />
-      <circle cx="7" cy="11" r="2" stroke={TEAL_DEEP} strokeWidth={sw} />
-      <line x1="11" y1="10" x2="19" y2="10" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-      <line x1="11" y1="13" x2="17" y2="13" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-      <line x1="5" y1="16" x2="19" y2="16" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-    </svg>
-  );
-  if (kind === "national_id") return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <rect x="2" y="4" width="20" height="16" rx="2" stroke={TEAL_DEEP} strokeWidth={sw} />
-      <rect x="5" y="8" width="5" height="5" rx="0.6" stroke={TEAL_DEEP} strokeWidth={sw} />
-      <line x1="12" y1="9" x2="19" y2="9" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-      <line x1="12" y1="12" x2="17" y2="12" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-      <line x1="5" y1="17" x2="19" y2="17" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-    </svg>
-  );
+// ─── Top Bar ─────────────────────────────────────────────────────────────────
+function TopBar({ onBack, step }: { onBack?: () => void; step?: 0 | 1 | 2 | 3 }) {
   return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <path d="M4 3H15L20 8V21H4Z" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinejoin="round" />
-      <path d="M15 3V8H20" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinejoin="round" />
-      <line x1="7" y1="13" x2="17" y2="13" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-      <line x1="7" y1="16" x2="17" y2="16" stroke={TEAL_DEEP} strokeWidth={sw} strokeLinecap="round" />
-    </svg>
+    <div>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "14px 20px 10px",
+      }}>
+        {onBack ? (
+          <button type="button" onClick={onBack} aria-label="Back" style={{
+            all: "unset", cursor: "pointer",
+            width: 36, height: 36, borderRadius: 8,
+            background: "rgba(255,255,255,0.07)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M8 2L3 7l5 5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : <div style={{ width: 36 }} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <VeridianMark size={18} />
+          <span style={{ fontWeight: 700, fontSize: 14, color: "#fff", letterSpacing: -0.2 }}>Veridian</span>
+        </div>
+        <div style={{ width: 36 }} />
+      </div>
+      {step !== undefined && <ProgressRail step={step} />}
+    </div>
   );
 }
 
-// ─── Country selector (bottom-border style) ──────────────────────────────────
+// ─── Card wrapper ─────────────────────────────────────────────────────────────
+function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={className} style={{
+      background: CARD, borderRadius: 20,
+      boxShadow: "0 4px 32px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
+      overflow: "hidden",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── Country Picker ────────────────────────────────────────────────────────────
 function CountryPicker({ value, onChange }: { value: Country | null; onChange: (c: Country) => void }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -200,49 +463,54 @@ function CountryPicker({ value, onChange }: { value: Country | null; onChange: (
 
   return (
     <div>
-      <div style={{ fontFamily: MONO, fontSize: 10, color: INK_3, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>
+      <label style={{ fontSize: 12, fontWeight: 600, color: INK_3, display: "block", marginBottom: 6, letterSpacing: 0.3 }}>
         Issuing country
-      </div>
+      </label>
       <button type="button" onClick={() => setOpen((o) => !o)} style={{
         all: "unset", cursor: "pointer", boxSizing: "border-box",
-        width: "100%", padding: "10px 0",
-        display: "flex", alignItems: "center", gap: 12,
-        borderBottom: `1px solid ${open ? TEAL : INK}`,
+        width: "100%", minHeight: BTN_H, borderRadius: R,
+        padding: "0 14px",
+        display: "flex", alignItems: "center", gap: 10,
+        background: SURFACE, border: `1.5px solid ${open ? BRAND : BORDER}`,
+        transition: "border-color 0.15s",
       }}>
-        {value ? (
-          <span style={{ fontSize: 22, lineHeight: 1 }}>{value.flag}</span>
-        ) : null}
-        <span style={{ fontSize: 16, fontWeight: 500, color: value ? INK : INK_3, flex: 1 }}>
-          {value ? value.name : "Select your country"}
+        {value && <span style={{ fontSize: 20 }}>{value.flag}</span>}
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 500, color: value ? INK : INK_4 }}>
+          {value ? value.name : "Select country"}
         </span>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M3 5L7 9L11 5" stroke={INK} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
+          <path d="M4 6l4 4 4-4" stroke={INK_3} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
-
       {open && (
-        <div style={{ marginTop: 8, borderRadius: 16, overflow: "hidden", border: `1px solid ${LINE}`, background: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
-          <div style={{ padding: 12, borderBottom: `1px solid ${LINE}` }}>
+        <div style={{
+          marginTop: 6, borderRadius: R, overflow: "hidden",
+          border: `1px solid ${BORDER}`,
+          background: CARD, boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+        }}>
+          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${BORDER}` }}>
             <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Search countries…"
-              style={{ width: "100%", outline: "none", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: PAPER }} />
+              placeholder="Search…" style={{
+                width: "100%", outline: "none",
+                border: `1px solid ${BORDER}`, borderRadius: 8,
+                padding: "7px 12px", fontSize: 14, boxSizing: "border-box",
+                background: SURFACE,
+              }} />
           </div>
-          <div style={{ maxHeight: 220, overflowY: "auto" }}>
-            {filtered.length === 0 && <p style={{ textAlign: "center", padding: "16px 0", fontSize: 13, color: INK_3 }}>No results</p>}
+          <div style={{ maxHeight: 230, overflowY: "auto" }}>
+            {filtered.length === 0 && <p style={{ textAlign: "center", padding: 16, fontSize: 13, color: INK_3 }}>No results</p>}
             {filtered.map((c) => (
-              <button key={c.code} type="button"
-                onClick={() => { onChange(c); setOpen(false); setQ(""); }}
-                style={{
-                  all: "unset", cursor: "pointer", boxSizing: "border-box",
-                  width: "100%", padding: "12px 16px",
-                  display: "flex", alignItems: "center", gap: 12,
-                  background: value?.code === c.code ? TEAL_SOFT : "transparent",
-                }}>
-                <span style={{ fontSize: 20 }}>{c.flag}</span>
-                <span style={{ fontSize: 14, fontWeight: 500, color: INK, flex: 1 }}>{c.name}</span>
+              <button key={c.code} type="button" onClick={() => { onChange(c); setOpen(false); setQ(""); }} style={{
+                all: "unset", cursor: "pointer", boxSizing: "border-box",
+                width: "100%", padding: "11px 14px",
+                display: "flex", alignItems: "center", gap: 10,
+                background: value?.code === c.code ? BRAND_L : "transparent",
+              }}>
+                <span style={{ fontSize: 18 }}>{c.flag}</span>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: INK }}>{c.name}</span>
                 {value?.code === c.code && (
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M2 7l3.5 3.5L12 3" stroke={TEAL} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M2 7l3.5 3.5L12 3" stroke={BRAND} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 )}
               </button>
@@ -254,494 +522,438 @@ function CountryPicker({ value, onChange }: { value: Country | null; onChange: (
   );
 }
 
-// ─── Doc Row (vertical list style) ───────────────────────────────────────────
-function DocRow({ kind, label, meta, badge, selected, onClick }: {
-  kind: DocType; label: string; meta: string; badge?: string; selected: boolean; onClick: () => void;
+// ─── Doc Type Row ──────────────────────────────────────────────────────────────
+function DocTypeRow({ label, meta, badge, selected, onClick }: {
+  label: string; meta: string; badge?: string; selected: boolean; onClick: () => void;
 }) {
   return (
     <button type="button" onClick={onClick} style={{
       all: "unset", cursor: "pointer", boxSizing: "border-box",
-      width: "100%", padding: "16px 0",
-      display: "flex", alignItems: "center", gap: 14,
-      borderBottom: `1px solid ${LINE}`,
-      background: selected ? TEAL_SOFT : "transparent",
-      borderRadius: selected ? 12 : 0,
-      paddingLeft: selected ? 8 : 0,
-      paddingRight: selected ? 8 : 0,
-      transition: "all 0.15s ease",
+      width: "100%", padding: "13px 14px",
+      display: "flex", alignItems: "center", gap: 12,
+      borderRadius: R, border: `1.5px solid ${selected ? BRAND : BORDER}`,
+      background: selected ? BRAND_L : SURFACE,
+      transition: "all 0.15s",
     }}>
       <div style={{
-        width: 44, height: 44, borderRadius: 12,
-        background: selected ? TEAL_TINT : TEAL_TINT,
+        width: 38, height: 38, borderRadius: 8, flexShrink: 0,
+        background: selected ? BRAND_G : BORDER,
         display: "flex", alignItems: "center", justifyContent: "center",
-        flexShrink: 0,
-        border: selected ? `1.5px solid ${TEAL}` : "1.5px solid transparent",
       }}>
-        <DocIcon kind={kind} />
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <rect x="3" y="2" width="14" height="16" rx="2" stroke={selected ? BRAND : INK_3} strokeWidth="1.6" />
+          <line x1="6" y1="8" x2="14" y2="8" stroke={selected ? BRAND : INK_3} strokeWidth="1.4" strokeLinecap="round" />
+          <line x1="6" y1="11" x2="11" y2="11" stroke={selected ? BRAND : INK_3} strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 15, fontWeight: 500, color: INK, letterSpacing: -0.2 }}>{label}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: selected ? BRAND_D : INK }}>{label}</span>
           {badge && (
             <span style={{
-              fontFamily: MONO, fontSize: 9, fontWeight: 500,
-              color: TEAL, background: TEAL_SOFT,
-              padding: "2px 6px", borderRadius: 4, letterSpacing: 0.4,
+              fontFamily: MONO, fontSize: 9, letterSpacing: 0.5, fontWeight: 500,
+              color: BRAND, background: BRAND_L, padding: "2px 7px", borderRadius: 999,
               textTransform: "uppercase",
             }}>{badge}</span>
           )}
         </div>
-        <div style={{ fontSize: 12, color: INK_3, marginTop: 2 }}>{meta}</div>
+        <span style={{ fontSize: 12, color: INK_3, marginTop: 2, display: "block" }}>{meta}</span>
       </div>
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
-        <path d="M4 2L8 6L4 10" stroke={selected ? TEAL : INK_3} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
-  );
-}
-
-// ─── Primary action button (dark pill) ───────────────────────────────────────
-function PrimaryBtn({ onClick, disabled, loading, children }: {
-  onClick?: () => void; disabled?: boolean; loading?: boolean; children?: React.ReactNode;
-}) {
-  return (
-    <button type="button" onClick={onClick} disabled={disabled || loading} style={{
-      all: "unset", cursor: disabled || loading ? "not-allowed" : "pointer",
-      boxSizing: "border-box", width: "100%", height: 54, borderRadius: 999,
-      background: disabled ? "rgba(15,22,21,0.12)" : INK,
-      color: disabled ? INK_3 : "#fff",
-      fontWeight: 600, fontSize: 15, letterSpacing: -0.1,
-      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-      boxShadow: disabled ? "none" : "0 8px 20px rgba(15,22,21,0.16)",
-      transition: "opacity 0.15s",
-      opacity: loading ? 0.7 : 1,
-    }}>
-      {loading ? (
-        <svg style={{ animation: "spin 1s linear infinite" }} width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <circle cx="10" cy="10" r="8" stroke="rgba(255,255,255,0.3)" strokeWidth="2.5" />
-          <path d="M10 2a8 8 0 0 1 8 8" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-        </svg>
-      ) : (
-        <>
-          {children}
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M2 7H12M12 7L8 3M12 7L8 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </>
-      )}
-    </button>
-  );
-}
-
-function GhostBtn({ onClick, children }: { onClick?: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      all: "unset", cursor: "pointer",
-      boxSizing: "border-box", width: "100%", height: 48, borderRadius: 999,
-      border: `1px solid ${INK}`,
-      color: INK,
-      fontWeight: 500, fontSize: 14,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      {children}
-    </button>
-  );
-}
-
-// ─── Method Row (pill-shaped, Persona style) ──────────────────────────────────
-function MethodRow({ kind, label, sub, primary, onClick }: {
-  kind: "camera" | "library" | "qr"; label: string; sub: string; primary?: boolean; onClick: () => void;
-}) {
-  const iconStroke = primary ? "#fff" : TEAL_DEEP;
-  return (
-    <button type="button" onClick={onClick} style={{
-      all: "unset", cursor: "pointer", boxSizing: "border-box",
-      width: "100%", padding: "14px 18px",
-      display: "flex", alignItems: "center", gap: 14,
-      background: primary ? INK : PAPER,
-      borderRadius: 999,
-      border: primary ? "none" : `1px solid ${INK}`,
-    }}>
-      <div style={{
-        width: 34, height: 34, borderRadius: 999,
-        background: primary ? "rgba(255,255,255,0.10)" : TEAL_TINT,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        flexShrink: 0,
-      }}>
-        {kind === "camera" && (
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2 5H5L6 3.5H10L11 5H14V13H2Z" stroke={iconStroke} strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-            <circle cx="8" cy="9" r="2.5" stroke={iconStroke} strokeWidth="1.4" />
-          </svg>
-        )}
-        {kind === "library" && (
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="3" width="12" height="10" rx="1.5" stroke={iconStroke} strokeWidth="1.4" />
-            <circle cx="6" cy="7" r="1.2" stroke={iconStroke} strokeWidth="1.4" />
-            <path d="M2 11L6 8L10 11L12 9L14 11" stroke={iconStroke} strokeWidth="1.4" strokeLinejoin="round" fill="none" />
-          </svg>
-        )}
-        {kind === "qr" && (
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="2" width="5" height="5" rx="0.5" stroke={iconStroke} strokeWidth="1.4" />
-            <rect x="9" y="2" width="5" height="5" rx="0.5" stroke={iconStroke} strokeWidth="1.4" />
-            <rect x="2" y="9" width="5" height="5" rx="0.5" stroke={iconStroke} strokeWidth="1.4" />
-            <rect x="11" y="11" width="3" height="3" fill={iconStroke} />
-          </svg>
-        )}
-      </div>
-      <div style={{ flex: 1, textAlign: "left" }}>
-        <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: -0.1, color: primary ? "#fff" : INK }}>{label}</div>
-        <div style={{ fontSize: 12, opacity: 0.65, marginTop: 1, color: primary ? "#fff" : INK }}>{sub}</div>
-      </div>
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <path d="M4 2L8 6L4 10" stroke={primary ? "rgba(255,255,255,0.5)" : INK_3} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
-  );
-}
-
-// ─── Document illustration (scanning frame + passport card) ──────────────────
-function DocIllustration({ docType }: { docType: DocType }) {
-  const isPassport = docType === "passport";
-  return (
-    <div style={{ width: "100%", display: "flex", justifyContent: "center", position: "relative" }}>
-      {isPassport ? (
-        <svg width="180" height="130" viewBox="0 0 180 130" fill="none">
-          {/* Scanning frame corners */}
-          {["M0 14 V0 H14", "M166 0 H180 V14", "M180 116 V130 H166", "M14 130 H0 V116"].map((d, i) => (
-            <path key={i} d={d} stroke={TEAL} strokeWidth="2" strokeLinecap="round" fill="none" />
-          ))}
-          {/* Passport booklet */}
-          <rect x="22" y="18" width="136" height="94" rx="6" fill={PAPER} stroke={INK} strokeWidth="1.5" />
-          <rect x="38" y="30" width="42" height="56" rx="3" fill={CORAL} />
-          <circle cx="59" cy="49" r="9" fill={PAPER} fillOpacity="0.5" stroke={PAPER} strokeWidth="1.5" />
-          <path d="M46 62 Q59 54 72 62" fill={PAPER} fillOpacity="0.5" />
-          <line x1="90" y1="38" x2="144" y2="38" stroke={INK} strokeWidth="1.4" strokeLinecap="round" />
-          <line x1="90" y1="48" x2="130" y2="48" stroke={INK} strokeWidth="1.4" strokeLinecap="round" />
-          <line x1="38" y1="74" x2="144" y2="74" stroke={TEAL} strokeWidth="1.2" strokeLinecap="round" />
-          <line x1="38" y1="80" x2="144" y2="80" stroke={TEAL} strokeWidth="1.2" strokeLinecap="round" />
-        </svg>
-      ) : (
-        <svg width="220" height="130" viewBox="0 0 220 130" fill="none">
-          {/* Scanning frame corners */}
-          {["M0 14 V0 H14", "M206 0 H220 V14", "M220 116 V130 H206", "M14 130 H0 V116"].map((d, i) => (
-            <path key={i} d={d} stroke={TEAL} strokeWidth="2" strokeLinecap="round" fill="none" />
-          ))}
-          {/* ID card */}
-          <rect x="18" y="22" width="184" height="86" rx="8" fill={PAPER} stroke={INK} strokeWidth="1.5" />
-          <rect x="34" y="36" width="34" height="42" rx="3" fill={CORAL} />
-          <circle cx="51" cy="49" r="7" fill={PAPER} fillOpacity="0.5" stroke={PAPER} strokeWidth="1.5" />
-          <path d="M40 68 Q51 62 62 68" fill={PAPER} fillOpacity="0.5" />
-          <line x1="80" y1="40" x2="180" y2="40" stroke={INK} strokeWidth="1.4" strokeLinecap="round" />
-          <line x1="80" y1="50" x2="155" y2="50" stroke={INK} strokeWidth="1.4" strokeLinecap="round" />
-          <line x1="80" y1="62" x2="164" y2="62" stroke={TEAL} strokeWidth="1.2" strokeLinecap="round" />
-          <line x1="80" y1="70" x2="144" y2="70" stroke={TEAL} strokeWidth="1.2" strokeLinecap="round" />
-          <line x1="34" y1="90" x2="186" y2="90" stroke={LINE} strokeWidth="1" strokeLinecap="round" />
-        </svg>
-      )}
-    </div>
-  );
-}
-
-// ─── Fake QR Code ─────────────────────────────────────────────────────────────
-function FakeQRCode({ size = 160 }: { size?: number }) {
-  const N = 21;
-  const c = size / N;
-  const inFinder = (x: number, y: number, ox: number, oy: number) => {
-    const lx = x - ox, ly = y - oy;
-    if (lx < 0 || lx > 6 || ly < 0 || ly > 6) return false;
-    return lx === 0 || lx === 6 || ly === 0 || ly === 6 || (lx >= 2 && lx <= 4 && ly >= 2 && ly <= 4);
-  };
-  const inFinderZone = (x: number, y: number) =>
-    (x <= 7 && y <= 7) || (x >= 13 && y <= 7) || (x <= 7 && y >= 13);
-  const cells: { x: number; y: number }[] = [];
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      let fill = false;
-      if (inFinder(x, y, 0, 0) || inFinder(x, y, 14, 0) || inFinder(x, y, 0, 14)) fill = true;
-      else if (!inFinderZone(x, y)) {
-        if (x === 6 || y === 6) fill = (x + y) % 2 === 0;
-        else fill = (x * 7 + y * 11 + x * y * 3) % 5 < 2;
-      }
-      if (fill) cells.push({ x, y });
-    }
-  }
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ borderRadius: 8 }}>
-      <rect width={size} height={size} fill="white" />
-      {cells.map(({ x, y }) => (
-        <rect key={`${x}-${y}`} x={x * c} y={y * c} width={c - 0.4} height={c - 0.4} fill={INK} />
-      ))}
-    </svg>
-  );
-}
-
-// ─── QR Device Screen ─────────────────────────────────────────────────────────
-function QRScreen({ token, onBack }: { token: string; onBack: () => void }) {
-  const url = `https://verify.veridianapi.com/s/${token}`;
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
-    }).catch(() => {});
-  };
-  return (
-    <div style={{ padding: "28px 24px 0" }}>
-      <button type="button" onClick={onBack} style={{
-        all: "unset", cursor: "pointer",
-        display: "flex", alignItems: "center", gap: 6,
-        color: INK_2, fontSize: 14, fontWeight: 500, marginBottom: 24,
-      }}>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M8 2L3 7L8 12" stroke={INK_2} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        Back
-      </button>
-      <h2 style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 400, color: INK, letterSpacing: -0.4, margin: 0 }}>
-        Continue on<br /><span style={{ fontStyle: "italic", color: TEAL_DEEP }}>another device.</span>
-      </h2>
-      <p style={{ marginTop: 12, fontSize: 14, color: INK_2, lineHeight: 1.5 }}>
-        Scan this code with your phone camera to open verification there.
-      </p>
-      <div style={{
-        marginTop: 24, padding: 20, borderRadius: 20,
-        background: PAPER_SHADE, display: "flex", justifyContent: "center",
-      }}>
-        <div style={{ padding: 16, background: "#fff", borderRadius: 12 }}>
-          <FakeQRCode size={160} />
-        </div>
-      </div>
-      <div style={{
-        marginTop: 16, padding: "10px 14px", borderRadius: 12, background: PAPER_SHADE,
-        display: "flex", alignItems: "center", gap: 8,
-      }}>
-        <span style={{ fontFamily: MONO, fontSize: 11, color: INK_3, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</span>
-      </div>
-      <div style={{ marginTop: 12 }}>
-        <PrimaryBtn onClick={copy}>{copied ? "Copied!" : "Copy link"}</PrimaryBtn>
-      </div>
-    </div>
-  );
-}
-
-// ─── Live Camera (circular frame) ────────────────────────────────────────────
-function CircularCamera({ onCapture }: { onCapture: (dataUrl: string) => void }) {
-  const [state, setState] = useState<"starting" | "live" | "denied">("starting");
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const fallbackRef = useRef<HTMLInputElement>(null);
-  const libRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!navigator?.mediaDevices?.getUserMedia) { setState("denied"); return; }
-    let cancelled = false;
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false })
-      .then((stream) => {
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
-        streamRef.current = stream;
-        const v = videoRef.current;
-        if (v) { v.srcObject = stream; v.play().catch(() => { if (!cancelled) setState("denied"); }); }
-        setState("live");
-      })
-      .catch(() => { if (!cancelled) setState("denied"); });
-    return () => { cancelled = true; streamRef.current?.getTracks().forEach((t) => t.stop()); };
-  }, []);
-
-  const capture = () => {
-    const v = videoRef.current, cv = canvasRef.current;
-    if (!v || !cv) return;
-    cv.width = v.videoWidth || 640; cv.height = v.videoHeight || 480;
-    cv.getContext("2d")?.drawImage(v, 0, 0, cv.width, cv.height);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    onCapture(cv.toDataURL("image/jpeg", 0.88));
-  };
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    onCapture(await fileToDataUrl(file)); e.target.value = "";
-  };
-
-  const total = 60;
-
-  if (state === "denied") {
-    return (
-      <div style={{ padding: "40px 24px", display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
+      {selected && (
         <div style={{
-          width: 64, height: 64, borderRadius: 999,
-          background: "#fef3c7",
-          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 20, height: 20, borderRadius: "50%", background: BRAND,
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
         }}>
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-            <path d="M3 5l22 22M11 6h10a2 2 0 0 1 2 2v8M6 8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h13" stroke="#d97706" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M1.5 5l2 2 5-5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <div>
-          <p style={{ fontWeight: 600, fontSize: 16, color: INK }}>Camera unavailable</p>
-          <p style={{ fontSize: 13, color: INK_2, marginTop: 4 }}>Upload a photo instead</p>
+      )}
+    </button>
+  );
+}
+
+// ─── SCREEN: Entry (Desktop QR / SMS handoff) ─────────────────────────────────
+function EntryScreen({ token, onContinue }: { token: string; onContinue: () => void }) {
+  const url = `https://verify.veridianapi.com/s/${token}`;
+  const [phone, setPhone] = useState("");
+  const [smsState, setSmsState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  const handleSend = async () => {
+    if (!phone.trim()) return;
+    setSmsState("sending");
+    await delay(1100); // simulate API
+    setSmsState("sent");
+  };
+
+  return (
+    <div className="animate-fade-up" style={{ padding: "0 20px 32px" }}>
+      <Card>
+        <div style={{ padding: "28px 24px 24px" }}>
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <ShieldHero />
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: -0.4, marginTop: 16, marginBottom: 8 }}>
+              Use your phone for the best experience
+            </h1>
+            <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.55, maxWidth: 300, margin: "0 auto" }}>
+              Your phone&apos;s camera gives the clearest document photos. Scan the QR code or get a link by SMS.
+            </p>
+          </div>
+
+          {/* QR Code */}
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
+            padding: "20px 16px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}`,
+            marginBottom: 20,
+          }}>
+            <FakeQRCode size={150} />
+            <div style={{ fontFamily: MONO, fontSize: 11, color: INK_3, letterSpacing: 0.3, textAlign: "center" }}>
+              Point your camera at this code
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+            <div style={{ flex: 1, height: 1, background: BORDER }} />
+            <span style={{ fontSize: 12, color: INK_4, fontWeight: 500 }}>or send a link</span>
+            <div style={{ flex: 1, height: 1, background: BORDER }} />
+          </div>
+
+          {/* SMS input */}
+          {smsState === "sent" ? (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "13px 16px", borderRadius: R,
+              background: OK_L, border: `1px solid #6ee7b7`,
+            }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <circle cx="9" cy="9" r="8" fill={OK} />
+                <path d="M5 9l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#065f46" }}>Link sent to {phone}</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)}
+                placeholder="+1 (555) 000-0000" type="tel"
+                style={{
+                  flex: 1, minHeight: BTN_H, borderRadius: R,
+                  border: `1.5px solid ${BORDER}`, padding: "0 14px",
+                  fontSize: 15, outline: "none", background: SURFACE,
+                  color: INK,
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              />
+              <button type="button" onClick={handleSend}
+                disabled={!phone.trim() || smsState === "sending"}
+                style={{
+                  minHeight: BTN_H, minWidth: 76, borderRadius: R,
+                  border: "none", background: phone.trim() ? BRAND : "#d1d5db",
+                  color: phone.trim() ? "#fff" : "#9ca3af",
+                  fontWeight: 600, fontSize: 14, cursor: phone.trim() ? "pointer" : "not-allowed",
+                }}>
+                {smsState === "sending" ? "…" : "Send"}
+              </button>
+            </div>
+          )}
         </div>
-        <input ref={fallbackRef} type="file" accept="image/*" capture="user" onChange={handleFile} style={{ display: "none" }} />
-        <input ref={libRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-          <PrimaryBtn onClick={() => fallbackRef.current?.click()}>Take photo</PrimaryBtn>
-          <GhostBtn onClick={() => libRef.current?.click()}>Choose from library</GhostBtn>
+        <Divider />
+        <div style={{ padding: "16px 24px 20px" }}>
+          <Btn variant="ghost" onClick={onContinue}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="3" width="12" height="10" rx="1.5" stroke={INK_3} strokeWidth="1.5" />
+              <circle cx="6" cy="7" r="1" fill={INK_3} />
+              <path d="M2 10l3-3 3 3 2-2 4 4" stroke={INK_3} strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+            Continue on this device
+          </Btn>
+          <p style={{ fontSize: 11, color: INK_4, textAlign: "center", marginTop: 10 }}>
+            Camera upload required — quality may vary on desktop
+          </p>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── SCREEN: Welcome ──────────────────────────────────────────────────────────
+function WelcomeScreen({ onNext }: { onNext: () => void }) {
+  return (
+    <div className="animate-fade-up" style={{ padding: "0 20px 32px" }}>
+      <Card>
+        <div style={{ padding: "32px 24px 24px" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+            <ShieldHero />
+          </div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: INK, letterSpacing: -0.5, textAlign: "center", margin: "0 0 8px" }}>
+            Verify your identity
+          </h1>
+          <p style={{ fontSize: 14, color: INK_3, textAlign: "center", lineHeight: 1.6, margin: "0 0 28px" }}>
+            Quick and secure. Takes about 2 minutes.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 28 }}>
+            {[
+              { n: 1, title: "Select your document", desc: "Passport, driving licence, or national ID" },
+              { n: 2, title: "Take a photo",          desc: "Clear shot of the front (and back if required)" },
+              { n: 3, title: "Take a selfie",          desc: "Live photo to match against your document" },
+            ].map(({ n, title, desc }) => (
+              <div key={n} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                  background: BRAND_L, border: `1.5px solid ${BRAND_G}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 13, fontWeight: 700, color: BRAND, fontFamily: MONO,
+                }}>{n}</div>
+                <div>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: INK, margin: 0 }}>{title}</p>
+                  <p style={{ fontSize: 12, color: INK_3, margin: "3px 0 0", lineHeight: 1.45 }}>{desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Btn onClick={onNext}>
+            Get started
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8h10M9 4l4 4-4 4" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Btn>
+
+          <div style={{
+            marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 6, fontFamily: MONO, fontSize: 10, color: INK_4, letterSpacing: 0.4,
+          }}>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <rect x="2" y="4.5" width="6" height="4.5" rx="0.5" stroke={INK_4} strokeWidth="1" />
+              <path d="M3.5 4.5V3C3.5 1.9 4.1 1 5 1s1.5.9 1.5 2v1.5" stroke={INK_4} strokeWidth="1" fill="none" />
+            </svg>
+            End-to-end encrypted · Powered by Veridian
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── SCREEN: DocSelect ────────────────────────────────────────────────────────
+function DocSelectScreen({ country, docType, onCountry, onDocType, onNext, onBack }: {
+  country: Country | null; docType: DocType | null;
+  onCountry: (c: Country) => void; onDocType: (d: DocType) => void;
+  onNext: () => void; onBack: () => void;
+}) {
+  return (
+    <div className="animate-slide-fwd" style={{ padding: "20px 20px 32px" }}>
+      <BackBtn onClick={onBack} />
+      <Card>
+        <div style={{ padding: "24px 20px" }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: INK, letterSpacing: -0.4, margin: "0 0 4px" }}>
+            Select your document
+          </h2>
+          <p style={{ fontSize: 13, color: INK_3, margin: "0 0 20px" }}>Choose the country that issued it</p>
+
+          <CountryPicker value={country} onChange={(c) => { onCountry(c); onDocType(null as unknown as DocType); }} />
+
+          {country && (
+            <div style={{ marginTop: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: INK_3, display: "block", marginBottom: 10, letterSpacing: 0.3 }}>
+                Document type
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {DOC_TYPES.map(({ value, label, meta }) => (
+                  <DocTypeRow key={value}
+                    label={label} meta={meta}
+                    badge={value === "passport" ? "Recommended" : undefined}
+                    selected={docType === value}
+                    onClick={() => onDocType(value)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {country && docType && (
+            <div style={{ marginTop: 20 }}>
+              <Btn onClick={onNext}>
+                Continue
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8h10M9 4l4 4-4 4" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </Btn>
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Live Camera View ─────────────────────────────────────────────────────────
+function LiveCam({ facing, overlay, onCapture, onDenied }: {
+  facing: "environment" | "user";
+  overlay: React.ReactNode;
+  onCapture: (dataUrl: string) => void;
+  onDenied: () => void;
+}) {
+  const { status, videoRef, canvasRef, capture } = useCamera(facing);
+  const quality = useFrameQuality(videoRef, status === "live");
+  const chips = qualityChips(quality, facing === "user");
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => { if (status === "denied") onDenied(); }, [status, onDenied]);
+
+  const handleCapture = () => {
+    setFlash(true);
+    setTimeout(() => setFlash(false), 280);
+    setTimeout(() => {
+      const d = capture();
+      if (d) onCapture(d);
+    }, 80); // slight delay so flash is visible
+  };
+
+  if (status === "starting") {
+    return (
+      <div style={{
+        aspectRatio: "3/4", background: "#0a0a0a",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12,
+      }}>
+        <svg style={{ animation: "spin 0.9s linear infinite" }} width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <circle cx="18" cy="18" r="14" stroke="rgba(255,255,255,0.10)" strokeWidth="3" />
+          <path d="M18 4a14 14 0 0 1 14 14" stroke={BRAND} strokeWidth="3" strokeLinecap="round" />
+        </svg>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Starting camera…</p>
       </div>
     );
   }
 
   return (
-    <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 520,
-      background: "radial-gradient(ellipse at 50% 35%, #2b3734 0%, #0d1413 70%, #050a09 100%)",
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 28,
-      paddingBottom: 60,
-    }}>
-      {/* Faint scan lines texture */}
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.08,
-        background: "repeating-linear-gradient(180deg, transparent 0 20px, rgba(255,255,255,0.05) 20px 21px)",
-      }} />
-
-      {/* Circular frame with rotating tick marks */}
-      <div style={{ position: "relative", width: 260, height: 260 }}>
-        {/* Rotating tick marks SVG */}
-        {state === "live" && (
-          <svg width="300" height="300" viewBox="0 0 300 300" style={{
-            position: "absolute", top: -20, left: -20,
-            animation: "veridian-rotate 24s linear infinite",
-          }}>
-            {Array.from({ length: total }).map((_, i) => {
-              const angle = (i / total) * Math.PI * 2;
-              const done = i < 20;
-              const r1 = 140, r2 = done ? 150 : 146;
-              const x1 = 150 + Math.cos(angle) * r1;
-              const y1 = 150 + Math.sin(angle) * r1;
-              const x2 = 150 + Math.cos(angle) * r2;
-              const y2 = 150 + Math.sin(angle) * r2;
-              return (
-                <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
-                  stroke={done ? TEAL : "rgba(255,255,255,0.25)"}
-                  strokeWidth={done ? 2 : 1.3}
-                  strokeLinecap="round" />
-              );
-            })}
-          </svg>
-        )}
-
-        {/* Inner circular video */}
-        <div style={{
-          position: "absolute", inset: 12,
-          borderRadius: "50%", overflow: "hidden",
-          background: "radial-gradient(circle at 50% 40%, #3d4a47 0%, #1a2322 80%)",
-          boxShadow: "inset 0 0 60px rgba(0,0,0,0.4)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          {state === "live" ? (
-            <video ref={videoRef} autoPlay muted playsInline
-              style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }}
-              aria-label="Camera preview" />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-              <svg style={{ animation: "spin 1s linear infinite" }} width="32" height="32" viewBox="0 0 32 32" fill="none">
-                <circle cx="16" cy="16" r="12" stroke="rgba(255,255,255,0.12)" strokeWidth="3" />
-                <path d="M16 4a12 12 0 0 1 12 12" stroke={TEAL} strokeWidth="3" strokeLinecap="round" />
-              </svg>
-            </div>
-          )}
-
-          {/* Face guide outline */}
-          {state === "live" && (
-            <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-              viewBox="0 0 236 236" preserveAspectRatio="xMidYMid slice">
-              <ellipse cx="118" cy="115" rx="72" ry="88" stroke="rgba(255,255,255,0.4)" strokeWidth="1.2" fill="none" />
-              <circle cx="102" cy="100" r="3" fill="rgba(255,255,255,0.5)" />
-              <circle cx="134" cy="100" r="3" fill="rgba(255,255,255,0.5)" />
-              <path d="M104 140 Q118 150 132 140" stroke="rgba(255,255,255,0.5)" strokeWidth="1.4" strokeLinecap="round" fill="none" />
-            </svg>
-          )}
-
-          {/* Scan line */}
-          {state === "live" && (
-            <div style={{
-              position: "absolute", left: 0, right: 0,
-              height: 2,
-              background: `linear-gradient(90deg, transparent, ${TEAL}, transparent)`,
-              boxShadow: `0 0 10px ${TEAL}`,
-              animation: "veridian-scan 3s ease-in-out infinite",
-            }} />
-          )}
-        </div>
+    <div style={{ position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "relative", aspectRatio: "3/4", background: "#000", overflow: "hidden" }}>
+        <video ref={videoRef} autoPlay muted playsInline
+          style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "cover",
+            transform: facing === "user" ? "scaleX(-1)" : "none",
+          }} aria-label="Camera feed" />
+        {overlay}
+        <CaptureFlash visible={flash} />
       </div>
 
-      {/* Instruction card */}
+      {/* Quality chips */}
       <div style={{
-        padding: "12px 18px", borderRadius: 16,
-        background: "rgba(15,22,21,0.55)", backdropFilter: "blur(12px)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        maxWidth: 280, textAlign: "center",
+        position: "absolute", bottom: 88, left: 0, right: 0,
+        display: "flex", justifyContent: "center", padding: "0 16px",
       }}>
-        <div style={{ fontFamily: SERIF, fontSize: 20, color: "#fff", letterSpacing: -0.3, lineHeight: 1.2 }}>
-          Look straight<br />
-          <span style={{ fontStyle: "italic", color: "#9de5cf" }}>at the camera.</span>
-        </div>
-        <div style={{
-          marginTop: 6, fontFamily: MONO, fontSize: 10,
-          color: "rgba(255,255,255,0.55)", letterSpacing: 0.6, textTransform: "uppercase",
-        }}>Good light · No glasses · Neutral expression</div>
+        <QualityBar chips={chips} />
       </div>
 
       {/* Capture button */}
-      {state === "live" && (
-        <button type="button" onClick={capture} aria-label="Capture selfie" style={{
-          all: "unset", cursor: "pointer",
-          width: 76, height: 76, borderRadius: 999,
-          background: "rgba(255,255,255,0.10)",
-          border: "3px solid rgba(255,255,255,0.9)",
-          padding: 5, boxSizing: "border-box",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{
-            width: "100%", height: "100%", borderRadius: 999,
-            background: TEAL,
-            boxShadow: `0 0 20px ${TEAL_GLOW}`,
-          }} />
+      <div style={{
+        position: "absolute", bottom: 20, left: 0, right: 0,
+        display: "flex", justifyContent: "center",
+      }}>
+        <button type="button" onClick={handleCapture} aria-label="Capture photo"
+          style={{
+            all: "unset", cursor: "pointer",
+            width: 68, height: 68, borderRadius: "50%",
+            background: BRAND, border: "4px solid rgba(255,255,255,0.85)",
+            boxShadow: `0 0 0 3px ${BRAND}, 0 6px 24px ${BRAND_G}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "transform 0.1s",
+          }}>
+          <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(255,255,255,0.75)" }} />
         </button>
-      )}
+      </div>
 
       <canvas ref={canvasRef} style={{ display: "none" }} aria-hidden="true" />
     </div>
   );
 }
 
-// ─── Image preview card ───────────────────────────────────────────────────────
-function PreviewCard({ src, quality, onRetake }: { src: string; quality: string | null; onRetake: () => void }) {
+// ─── Upload fallback (camera denied) ─────────────────────────────────────────
+function UploadFallback({ label, onFile, token, onQR }: {
+  label: string; onFile: (dataUrl: string) => void; token: string; onQR?: () => void;
+}) {
+  const camRef = useRef<HTMLInputElement>(null);
+  const libRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    onFile(await fileToDataUrl(f)); e.target.value = "";
+  };
+
   return (
-    <>
+    <div style={{ padding: "20px 20px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "12px 16px", borderRadius: R, background: WARN_L, border: `1px solid #fcd34d`,
+      }}>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
+          <path d="M9 3L1.5 15h15L9 3z" stroke={WARN} strokeWidth="1.5" strokeLinejoin="round" />
+          <line x1="9" y1="8" x2="9" y2="11" stroke={WARN} strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="9" cy="13" r="0.75" fill={WARN} />
+        </svg>
+        <p style={{ fontSize: 12, color: "#78350f", lineHeight: 1.45 }}>
+          Camera access denied. Upload a photo of your {label} instead.
+        </p>
+      </div>
+      <input ref={camRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
+      <input ref={libRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+      <Btn onClick={() => camRef.current?.click()}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 5h2.5l1-1.5h5l1 1.5H14v9H2V5z" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" fill="none" />
+          <circle cx="8" cy="10" r="2.2" stroke="#fff" strokeWidth="1.4" />
+        </svg>
+        Take a photo
+      </Btn>
+      <Btn variant="ghost" onClick={() => libRef.current?.click()}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="3" width="12" height="10" rx="1.5" stroke={INK_3} strokeWidth="1.4" />
+          <circle cx="5.5" cy="6.5" r="1.2" stroke={INK_3} strokeWidth="1.3" />
+          <path d="M2 11l3-3 3 3 2-2 4 4" stroke={INK_3} strokeWidth="1.3" strokeLinejoin="round" />
+        </svg>
+        Choose from library
+      </Btn>
+      {onQR && (
+        <Btn variant="ghost" onClick={onQR}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="2" y="2" width="5" height="5" rx="0.5" stroke={INK_3} strokeWidth="1.4" />
+            <rect x="9" y="2" width="5" height="5" rx="0.5" stroke={INK_3} strokeWidth="1.4" />
+            <rect x="2" y="9" width="5" height="5" rx="0.5" stroke={INK_3} strokeWidth="1.4" />
+            <rect x="11" y="11" width="3" height="3" fill={INK_3} />
+          </svg>
+          Use another device (QR)
+        </Btn>
+      )}
+    </div>
+  );
+}
+
+// ─── Image preview ─────────────────────────────────────────────────────────────
+function ImagePreviewCard({ src, quality, onRetake, onContinue, continueLabel, submitting }: {
+  src: string; quality: string | null; onRetake: () => void;
+  onContinue: () => void; continueLabel?: string; submitting?: boolean;
+}) {
+  return (
+    <div style={{ padding: "16px 20px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
       {quality && (
         <div style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "12px 16px", borderRadius: 14,
-          background: "#fffbeb", border: "1px solid #fde68a",
-          marginBottom: 0,
+          display: "flex", gap: 10, alignItems: "flex-start",
+          padding: "10px 14px", borderRadius: R, background: WARN_L, border: `1px solid #fcd34d`,
         }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ marginTop: 1, flexShrink: 0 }}>
-            <path d="M8 2L1 14h14L8 2z" stroke="#d97706" strokeWidth="1.4" strokeLinejoin="round" />
-            <path d="M8 7v3M8 11.5v.5" stroke="#d97706" strokeWidth="1.5" strokeLinecap="round" />
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+            <path d="M8 2L1 14h14L8 2z" stroke={WARN} strokeWidth="1.4" strokeLinejoin="round" />
+            <line x1="8" y1="7" x2="8" y2="10" stroke={WARN} strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="8" cy="12" r="0.7" fill={WARN} />
           </svg>
           <p style={{ fontSize: 12, color: "#78350f", lineHeight: 1.5 }}>{quality}</p>
         </div>
       )}
-      <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", background: PAPER_SHADE }}>
-        <img src={src} alt="Preview" style={{ width: "100%", objectFit: "cover", maxHeight: 280, minHeight: 160, display: "block" }} />
+      <div style={{ position: "relative", borderRadius: R, overflow: "hidden", background: SURFACE }}>
+        <img src={src} alt="Captured" style={{ width: "100%", display: "block", maxHeight: 280, objectFit: "cover" }} />
         <div style={{
-          position: "absolute", top: 12, right: 12,
-          display: "flex", alignItems: "center", gap: 6,
-          padding: "4px 10px", borderRadius: 999,
-          background: "rgba(15,110,86,0.88)", color: "#fff",
-          fontSize: 11, fontWeight: 600,
+          position: "absolute", top: 10, right: 10,
+          display: "flex", gap: 5, padding: "5px 10px", borderRadius: 999,
+          background: "rgba(15,110,86,0.88)", color: "#fff", fontSize: 11, fontWeight: 600,
         }}>
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
             <path d="M1.5 5l2 2 5-5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -749,478 +961,480 @@ function PreviewCard({ src, quality, onRetake }: { src: string; quality: string 
           Captured
         </div>
       </div>
-    </>
-  );
-}
-
-// ─── Checklist row (processing screen) ───────────────────────────────────────
-function ChecklistRow({ state, label, meta }: {
-  state: "done" | "active" | "pending"; label: string; meta?: string;
-}) {
-  const leading = state === "done" ? (
-    <div style={{
-      width: 24, height: 24, borderRadius: 999, background: TEAL,
-      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-    }}>
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </div>
-  ) : state === "active" ? (
-    <div style={{ width: 24, height: 24, flexShrink: 0 }}>
-      <svg viewBox="0 0 24 24" style={{ width: 24, height: 24, animation: "spin 1.1s linear infinite" }}>
-        <circle cx="12" cy="12" r="10" stroke={TEAL_SOFT} strokeWidth="2.5" fill="none" />
-        <circle cx="12" cy="12" r="10" stroke={TEAL} strokeWidth="2.5" fill="none" strokeLinecap="round" strokeDasharray="14 80" />
-      </svg>
-    </div>
-  ) : (
-    <div style={{
-      width: 24, height: 24, borderRadius: 999,
-      border: `1.5px solid ${LINE}`, flexShrink: 0,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-        <circle cx="5" cy="5" r="4" stroke={INK_3} strokeWidth="1" fill="none" opacity="0.4" />
-        <line x1="5" y1="5" x2="5" y2="2.5" stroke={INK_3} strokeWidth="1" strokeLinecap="round" />
-        <line x1="5" y1="5" x2="6.8" y2="5" stroke={INK_3} strokeWidth="1" strokeLinecap="round" />
-      </svg>
-    </div>
-  );
-
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 14,
-      padding: "14px 0", borderBottom: `1px solid ${LINE}`,
-    }}>
-      {leading}
-      <div style={{ flex: 1 }}>
-        <div style={{
-          fontSize: 14, fontWeight: state === "active" ? 600 : 500,
-          color: state === "pending" ? INK_3 : INK, letterSpacing: -0.1,
-        }}>{label}</div>
-        {meta && <div style={{ fontFamily: MONO, fontSize: 10, color: INK_3, marginTop: 2, letterSpacing: 0.3 }}>{meta}</div>}
-      </div>
-      {state === "done" && (
-        <span style={{ fontFamily: MONO, fontSize: 10, color: TEAL, letterSpacing: 0.6, textTransform: "uppercase" }}>Done</span>
-      )}
-      {state === "active" && (
-        <span style={{ fontFamily: MONO, fontSize: 10, color: TEAL, letterSpacing: 0.6, textTransform: "uppercase" }}>Running</span>
-      )}
-    </div>
-  );
-}
-
-// ─── Hourglass (processing illustration) ─────────────────────────────────────
-function HourglassMark() {
-  return (
-    <div style={{
-      width: 84, height: 84, borderRadius: 999, background: INK,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>
-      <svg width="36" height="44" viewBox="0 0 36 44" fill="none" style={{ animation: "veridian-hourglass 2.4s ease-in-out infinite" }}>
-        <path d="M4 2H32M4 42H32" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
-        <path d="M6 2V8Q6 14 18 22Q30 30 30 36V42" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" />
-        <path d="M30 2V8Q30 14 18 22Q6 30 6 36V42" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" />
-        <path d="M12 6Q12 10 18 14Q24 18 24 22L24 6Z" fill={TEAL} />
-        <circle cx="18" cy="26" r="1.5" fill={TEAL} />
-        <circle cx="18" cy="30" r="1" fill={TEAL} opacity="0.6" />
-      </svg>
-    </div>
-  );
-}
-
-// ─── AnimatedCheck / AnimatedError ───────────────────────────────────────────
-function AnimatedCheck() {
-  return (
-    <div style={{ animation: "scale-in 0.4s cubic-bezier(0.34,1.56,0.64,1) both", width: 88, height: 88 }}>
-      <svg width="88" height="88" viewBox="0 0 88 88" fill="none">
-        <circle cx="44" cy="44" r="40" fill={TEAL_SOFT} />
-        <circle cx="44" cy="44" r="36" stroke={TEAL} strokeWidth="2.5" />
-        <path d="M28 44l11 11 21-23" stroke={TEAL} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-          strokeDasharray="56" strokeDashoffset="56"
-          style={{ animation: "check-draw 0.5s cubic-bezier(0.22,1,0.36,1) 0.15s both" }} />
-      </svg>
-    </div>
-  );
-}
-
-function AnimatedError() {
-  return (
-    <div style={{ animation: "scale-in 0.4s cubic-bezier(0.34,1.56,0.64,1) both", width: 80, height: 80 }}>
-      <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-        <circle cx="40" cy="40" r="36" fill="rgba(239,68,68,0.08)" />
-        <circle cx="40" cy="40" r="32" stroke="#ef4444" strokeWidth="2.5" />
-        <path d="M28 28l24 24M52 28L28 52" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" />
-      </svg>
-    </div>
-  );
-}
-
-// ─── Screen 1: Document Select ────────────────────────────────────────────────
-function DocSelectScreen({ country, docType, onCountryChange, onDocTypeChange, onNext }: {
-  country: Country | null; docType: DocType | null;
-  onCountryChange: (c: Country) => void; onDocTypeChange: (d: DocType) => void;
-  onNext: () => void;
-}) {
-  return (
-    <div style={{ padding: "28px 24px 0" }}>
-      <h1 style={{
-        margin: 0, fontFamily: SERIF, fontSize: 36, fontWeight: 400,
-        letterSpacing: -0.5, lineHeight: 1.05, color: INK,
-      }}>
-        Let&apos;s verify<br />
-        <span style={{ fontStyle: "italic", color: TEAL_DEEP }}>who you are.</span>
-      </h1>
-      <p style={{ margin: "14px 0 0", fontSize: 14, color: INK_2, lineHeight: 1.55, maxWidth: 300 }}>
-        We&apos;ll need a government-issued document and a quick selfie. Takes about two minutes.
-      </p>
-
-      <div style={{ marginTop: 28 }}>
-        <CountryPicker value={country} onChange={(c) => { onCountryChange(c); onDocTypeChange(null as unknown as DocType); }} />
-      </div>
-
-      <div style={{ marginTop: 22 }}>
-        <div style={{ fontFamily: MONO, fontSize: 10, color: INK_3, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>
-          Choose one
-        </div>
-        {DOC_TYPES.map(({ value, label, meta }) => (
-          <DocRow
-            key={value}
-            kind={value}
-            label={label}
-            meta={meta}
-            badge={value === "passport" ? "Recommended" : undefined}
-            selected={docType === value}
-            onClick={() => onDocTypeChange(value)}
-          />
-        ))}
-      </div>
-
-      <div style={{ marginTop: 24, paddingBottom: 40 }}>
-        <PrimaryBtn onClick={onNext} disabled={!country || !docType}>Continue</PrimaryBtn>
-        <div style={{
-          marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-          fontFamily: MONO, fontSize: 10, color: INK_3, letterSpacing: 0.5,
-        }}>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-            <rect x="2" y="4.5" width="6" height="4.5" rx="0.5" stroke={INK_3} strokeWidth="1" />
-            <path d="M3.5 4.5V3C3.5 1.9 4.1 1 5 1C5.9 1 6.5 1.9 6.5 3V4.5" stroke={INK_3} strokeWidth="1" fill="none" />
-          </svg>
-          End-to-end encrypted · Powered by Veridian
-        </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <Btn onClick={onContinue} loading={submitting}>{!submitting && (continueLabel ?? "Use this photo")}</Btn>
+        <Btn variant="ghost" onClick={onRetake}>Retake</Btn>
       </div>
     </div>
   );
 }
 
-// ─── Screen 2: Upload Method ──────────────────────────────────────────────────
-function DocMethodScreen({ docLabel, country, isFront, onCapture, onBack, token }: {
-  docLabel: string; country: Country | null; isFront: boolean;
-  onCapture: (dataUrl: string) => void; onBack: () => void; token: string;
-}) {
-  const [showQR, setShowQR] = useState(false);
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const libraryRef = useRef<HTMLInputElement>(null);
-  const docType = DOC_TYPES.find((d) => d.label === docLabel)?.value ?? "passport";
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    onCapture(await fileToDataUrl(file)); e.target.value = "";
-  };
-
-  if (showQR) return <QRScreen token={token} onBack={() => setShowQR(false)} />;
-
-  const countryName = country?.name ?? "your country";
-  const side = isFront ? "front of your" : "back of your";
-
+// ─── QR Screen (inside flow) ──────────────────────────────────────────────────
+function QRFlowScreen({ token, onBack }: { token: string; onBack: () => void }) {
+  const url = `https://verify.veridianapi.com/s/${token}`;
+  const [copied, setCopied] = useState(false);
   return (
-    <div style={{ padding: "28px 24px 0" }}>
-      <h1 style={{
-        margin: 0, fontFamily: SERIF, fontSize: 34, fontWeight: 400,
-        letterSpacing: -0.5, lineHeight: 1.05, color: INK,
-      }}>
-        Capture your<br />
-        <span style={{ fontStyle: "italic", color: TEAL_DEEP }}>
-          {countryName} {docLabel.toLowerCase()}.
-        </span>
-      </h1>
-      <p style={{ margin: "12px 0 0", fontSize: 14, color: INK_2, lineHeight: 1.5, maxWidth: 300 }}>
-        {isFront
-          ? "Place it on a flat surface in good light."
-          : `Now flip it over — we need the ${side} ${docLabel.toLowerCase()}.`
-        }
-      </p>
-
-      {/* Illustration */}
-      <div style={{
-        margin: "20px 0 0",
-        background: PAPER_SHADE, borderRadius: 20,
-        padding: "24px 16px",
-      }}>
-        <DocIllustration docType={docType} />
-      </div>
-
-      {/* Do / don't chips */}
-      <div style={{ marginTop: 14, display: "flex", gap: 16, justifyContent: "center" }}>
-        {([["do", "Good light"], ["do", "All corners"], ["dont", "No glare"]] as const).map(([t, l], i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{
-              width: 16, height: 16, borderRadius: 999,
-              background: t === "do" ? TEAL : CORAL,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              {t === "do" ? (
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                  <path d="M1 4L3 6L7 2" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              ) : (
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                  <path d="M2 2L6 6M6 2L2 6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
-              )}
-            </div>
-            <span style={{ fontSize: 12, color: INK_2, fontWeight: 500 }}>{l}</span>
+    <div style={{ padding: "0 20px 32px" }}>
+      <BackBtn onClick={onBack} />
+      <Card>
+        <div style={{ padding: "24px 20px" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 6px" }}>Continue on another device</h2>
+          <p style={{ fontSize: 13, color: INK_3, margin: "0 0 20px", lineHeight: 1.5 }}>
+            Scan this code with your phone camera to open the verification there.
+          </p>
+          <div style={{ display: "flex", justifyContent: "center", padding: "16px", background: SURFACE, borderRadius: 14, marginBottom: 16 }}>
+            <FakeQRCode size={160} />
           </div>
-        ))}
-      </div>
-
-      {/* Method buttons */}
-      <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 10, paddingBottom: 40 }}>
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
-        <input ref={libraryRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-        <MethodRow kind="camera" label="Take a photo" sub="Use this device&apos;s camera" primary onClick={() => cameraRef.current?.click()} />
-        <MethodRow kind="library" label="Choose from library" sub="Pick a saved photo" onClick={() => libraryRef.current?.click()} />
-        <MethodRow kind="qr" label="Use another device" sub="Scan a QR code" onClick={() => setShowQR(true)} />
-      </div>
+          <div style={{ padding: "10px 14px", borderRadius: R, background: SURFACE, border: `1px solid ${BORDER}`, marginBottom: 14 }}>
+            <p style={{ fontFamily: MONO, fontSize: 11, color: INK_3, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</p>
+          </div>
+          <Btn onClick={() => { navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2200); }); }}>
+            {copied ? "✓ Copied!" : "Copy link"}
+          </Btn>
+        </div>
+      </Card>
     </div>
   );
 }
 
-// ─── Document preview screen ──────────────────────────────────────────────────
-function DocPreviewScreen({ title, subtitle, image, quality, continueLabel, onRetake, onContinue }: {
-  title: string; subtitle: string; image: string; quality: string | null;
-  continueLabel?: string; onRetake: () => void; onContinue: () => void;
+// ─── SCREEN: DocCapture ───────────────────────────────────────────────────────
+function DocCaptureScreen({ docLabel, docTypeVal, hasBack, country, onFront, onBack: onBackDoc, onBack2, token }: {
+  docLabel: string; docTypeVal: DocType; hasBack: boolean; country: Country | null;
+  onFront: (front: string, frontQ: string | null) => void;
+  onBack2: (back: string, backQ: string | null) => void;
+  onBack: () => void; token: string;
 }) {
-  return (
-    <div style={{ padding: "28px 24px 0" }}>
-      <h1 style={{
-        margin: 0, fontFamily: SERIF, fontSize: 28, fontWeight: 400,
-        letterSpacing: -0.4, lineHeight: 1.1, color: INK,
-      }}>
-        {title}
-      </h1>
-      <p style={{ margin: "10px 0 0", fontSize: 14, color: INK_2, lineHeight: 1.5 }}>{subtitle}</p>
-
-      <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-        <PreviewCard src={image} quality={quality} onRetake={onRetake} />
-      </div>
-
-      <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 10, paddingBottom: 40 }}>
-        <PrimaryBtn onClick={onContinue}>{continueLabel ?? "Continue"}</PrimaryBtn>
-        <GhostBtn onClick={onRetake}>Retake photo</GhostBtn>
-      </div>
-    </div>
-  );
-}
-
-// ─── Screen 3: Selfie ─────────────────────────────────────────────────────────
-type SelfieMode = "camera" | "preview";
-
-function SelfieScreen({ image, onCapture, onClear, onSubmit, submitting }: {
-  image: string | null; onCapture: (d: string) => void; onClear: () => void;
-  onSubmit: () => void; submitting: boolean;
-}) {
-  const [mode, setMode] = useState<SelfieMode>(image ? "preview" : "camera");
-  const [quality, setQuality] = useState<string | null>(null);
+  const [phase, setPhase] = useState<CapturePhase>("front-cam");
+  const [frontImg, setFrontImg] = useState<string | null>(null);
+  const [frontQ, setFrontQ] = useState<string | null>(null);
+  const [camDenied, setCamDenied] = useState(false);
+  const [showQR, setShowQR] = useState(false);
   const [camKey, setCamKey] = useState(0);
+  const libRef = useRef<HTMLInputElement>(null);
 
-  const handleCapture = async (dataUrl: string) => {
-    const warn = await checkQuality(dataUrl);
-    setQuality(warn);
-    onCapture(dataUrl);
-    setMode("preview");
+  const handleCaptureFront = async (dataUrl: string) => {
+    const q = await checkImageQuality(dataUrl);
+    setFrontImg(dataUrl); setFrontQ(q); setPhase("front-preview");
   };
 
-  const retake = () => { setMode("camera"); setQuality(null); onClear(); setCamKey((k) => k + 1); };
+  const handleCaptureBack = async (dataUrl: string) => {
+    const q = await checkImageQuality(dataUrl);
+    onBack2(dataUrl, q);
+  };
 
-  if (mode === "preview" && image) {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const dataUrl = await fileToDataUrl(f); e.target.value = "";
+    if (phase === "front-cam") await handleCaptureFront(dataUrl);
+    else if (phase === "back-cam") await handleCaptureBack(dataUrl);
+  };
+
+  if (showQR) return <QRFlowScreen token={token} onBack={() => setShowQR(false)} />;
+
+  // Front camera
+  if (phase === "front-cam") {
+    const isPassport = docTypeVal === "passport";
     return (
-      <div style={{ padding: "28px 24px 0" }}>
-        <h1 style={{
-          margin: 0, fontFamily: SERIF, fontSize: 30, fontWeight: 400,
-          letterSpacing: -0.4, lineHeight: 1.1, color: INK,
-        }}>
-          Looking<br />
-          <span style={{ fontStyle: "italic", color: TEAL_DEEP }}>good.</span>
-        </h1>
-        <p style={{ margin: "10px 0 0", fontSize: 14, color: INK_2, lineHeight: 1.5 }}>
-          Ready to submit your verification.
-        </p>
-        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-          <PreviewCard src={image} quality={quality} onRetake={retake} />
-        </div>
-        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 10, paddingBottom: 40 }}>
-          <PrimaryBtn onClick={onSubmit} loading={submitting}>
-            {!submitting && "Submit verification"}
-          </PrimaryBtn>
-          <GhostBtn onClick={retake}>Retake selfie</GhostBtn>
+      <div className="animate-slide-fwd" style={{ padding: "0 20px 32px" }}>
+        <BackBtn onClick={onBackDoc} />
+        <Card>
+          <div style={{ padding: "16px 20px 12px" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 4px" }}>
+              {isPassport ? "Open to the photo page" : `Front of your ${docLabel.toLowerCase()}`}
+            </h2>
+            <p style={{ fontSize: 13, color: INK_3, margin: 0, lineHeight: 1.45 }}>
+              {isPassport
+                ? "Place the photo page flat in good light. All corners must be visible."
+                : "Hold the document flat. Ensure all four corners are in frame."}
+            </p>
+          </div>
+          {camDenied ? (
+            <UploadFallback
+              label={docLabel.toLowerCase()}
+              onFile={handleCaptureFront}
+              token={token}
+              onQR={() => setShowQR(true)}
+            />
+          ) : (
+            <LiveCam
+              key={camKey}
+              facing="environment"
+              overlay={<DocOverlay isPassport={isPassport} />}
+              onCapture={handleCaptureFront}
+              onDenied={() => setCamDenied(true)}
+            />
+          )}
+          <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center" }}>
+            <button type="button" onClick={() => setShowQR(true)} style={{
+              all: "unset", cursor: "pointer",
+              fontSize: 12, color: BRAND, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3,
+            }}>Use another device</button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Front preview
+  if (phase === "front-preview" && frontImg) {
+    return (
+      <div className="animate-slide-fwd" style={{ padding: "0 20px 32px" }}>
+        <BackBtn onClick={() => { setFrontImg(null); setFrontQ(null); setPhase("front-cam"); setCamKey((k) => k + 1); }} />
+        <Card>
+          <div style={{ padding: "16px 20px 0" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 4px" }}>Check the front</h2>
+            <p style={{ fontSize: 13, color: INK_3, margin: 0 }}>All text visible and corners in frame?</p>
+          </div>
+          <ImagePreviewCard
+            src={frontImg} quality={frontQ}
+            onRetake={() => { setFrontImg(null); setFrontQ(null); setPhase("front-cam"); setCamKey((k) => k + 1); }}
+            onContinue={() => {
+              if (hasBack) setPhase("back-cam");
+              else onFront(frontImg, frontQ);
+            }}
+            continueLabel={hasBack ? "Continue to back" : "Use this photo"}
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  // Back camera
+  if (phase === "back-cam") {
+    return (
+      <div className="animate-slide-fwd" style={{ padding: "0 20px 32px" }}>
+        <BackBtn onClick={() => setPhase("front-preview")} />
+        <Card>
+          <div style={{ padding: "16px 20px 12px" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 4px" }}>Flip to the back</h2>
+            <p style={{ fontSize: 13, color: INK_3, margin: 0, lineHeight: 1.45 }}>
+              Now photograph the back of your {docLabel.toLowerCase()}.
+            </p>
+          </div>
+          {camDenied ? (
+            <UploadFallback label={`back of ${docLabel.toLowerCase()}`} onFile={handleCaptureBack} token={token} />
+          ) : (
+            <LiveCam
+              key={`back-${camKey}`}
+              facing="environment"
+              overlay={<DocOverlay isPassport={false} />}
+              onCapture={handleCaptureBack}
+              onDenied={() => setCamDenied(true)}
+            />
+          )}
+        </Card>
+        {/* Also continue front when hasBack but back not yet captured — pass front data */}
+        <div style={{ marginTop: 12 }}>
+          <Btn variant="ghost" onClick={() => onFront(frontImg!, frontQ)}>
+            Skip back side
+          </Btn>
         </div>
       </div>
     );
   }
 
-  return <CircularCamera key={camKey} onCapture={handleCapture} />;
+  return null;
 }
 
-// ─── Screen 4: Processing ─────────────────────────────────────────────────────
-const PROC_STEPS: { label: string; meta: string }[] = [
-  { label: "Document uploaded",   meta: "Secure transfer complete" },
-  { label: "Reading document",    meta: "MRZ + visual zone parsed" },
-  { label: "Checking sanctions",  meta: "134 global watchlists" },
-  { label: "Matching faces",      meta: "Biometric comparison" },
+async function checkImageQuality(dataUrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = Math.min(img.width, 120), h = Math.min(img.height, 120);
+        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        const ctx = cv.getContext("2d");
+        if (!ctx) { resolve(null); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        const d = ctx.getImageData(0, 0, w, h).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+        const brightness = sum / (d.length / 4);
+        if (brightness < 40)  resolve("Image appears too dark. Try in better lighting.");
+        else if (brightness > 220) resolve("Image appears overexposed. Reduce glare or brightness.");
+        else resolve(null);
+      } catch { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+// ─── SCREEN: Selfie ────────────────────────────────────────────────────────────
+function SelfieScreen({ image, onCapture, onClear, onSubmit, onBack, submitting, token }: {
+  image: string | null; onCapture: (d: string) => void; onClear: () => void;
+  onSubmit: () => void; onBack: () => void; submitting: boolean; token: string;
+}) {
+  const [camDenied, setCamDenied] = useState(false);
+  const [selfieQ, setSelfieQ] = useState<string | null>(null);
+  const [camKey, setCamKey] = useState(0);
+  const [showQR, setShowQR] = useState(false);
+  const libRef = useRef<HTMLInputElement>(null);
+
+  const handleCapture = async (dataUrl: string) => {
+    const q = await checkImageQuality(dataUrl);
+    setSelfieQ(q); onCapture(dataUrl);
+  };
+
+  const retake = () => { setSelfieQ(null); onClear(); setCamKey((k) => k + 1); };
+
+  if (showQR) return <QRFlowScreen token={token} onBack={() => setShowQR(false)} />;
+
+  if (image) {
+    return (
+      <div className="animate-slide-fwd" style={{ padding: "0 20px 32px" }}>
+        <BackBtn onClick={retake} />
+        <Card>
+          <div style={{ padding: "16px 20px 0" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 4px" }}>Check your selfie</h2>
+            <p style={{ fontSize: 13, color: INK_3, margin: 0 }}>Face clearly visible and well-lit?</p>
+          </div>
+          <ImagePreviewCard
+            src={image} quality={selfieQ}
+            onRetake={retake}
+            onContinue={onSubmit}
+            continueLabel="Submit verification"
+            submitting={submitting}
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-slide-fwd" style={{ padding: "0 20px 32px" }}>
+      <BackBtn onClick={onBack} />
+      <Card>
+        <div style={{ padding: "16px 20px 12px" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 4px" }}>Take a selfie</h2>
+          <p style={{ fontSize: 13, color: INK_3, margin: 0, lineHeight: 1.45 }}>
+            Position your face inside the oval. Look directly at the camera.
+          </p>
+        </div>
+        {camDenied ? (
+          <>
+            <input ref={libRef} type="file" accept="image/*" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; await handleCapture(await fileToDataUrl(f)); e.target.value = ""; }} style={{ display: "none" }} />
+            <UploadFallback label="selfie" onFile={handleCapture} token={token} onQR={() => setShowQR(true)} />
+          </>
+        ) : (
+          <LiveCam
+            key={camKey}
+            facing="user"
+            overlay={<FaceOverlay />}
+            onCapture={handleCapture}
+            onDenied={() => setCamDenied(true)}
+          />
+        )}
+        {!camDenied && (
+          <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center" }}>
+            <button type="button" onClick={() => setShowQR(true)} style={{
+              all: "unset", cursor: "pointer",
+              fontSize: 12, color: BRAND, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 3,
+            }}>Use another device</button>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── SCREEN: Processing ────────────────────────────────────────────────────────
+const PROC_STEPS = [
+  { label: "Uploading documents",   meta: "Secure transfer" },
+  { label: "Reading document",      meta: "MRZ + visual fields" },
+  { label: "Checking sanctions",    meta: "134 global watchlists" },
+  { label: "Matching faces",        meta: "Biometric comparison" },
 ];
 
-function ProcessingScreen({ currentStep, result }: { currentStep: number; result: VerificationResult | null }) {
-  if (result) {
-    return (
-      <div style={{ padding: "40px 24px 0" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
+function ProcessingScreen({ step }: { step: number }) {
+  return (
+    <div className="animate-fade-up" style={{ padding: "0 20px 32px" }}>
+      <Card>
+        <div style={{ padding: "32px 20px 24px" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+            <svg style={{ animation: "spin 1.2s linear infinite" }} width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="20" stroke={BORDER} strokeWidth="4" />
+              <path d="M24 4a20 20 0 0 1 20 20" stroke={BRAND} strokeWidth="4" strokeLinecap="round" />
+            </svg>
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: INK, textAlign: "center", margin: "0 0 6px" }}>
+            Verifying your identity
+          </h2>
+          <p style={{ fontSize: 13, color: INK_3, textAlign: "center", margin: "0 0 24px", lineHeight: 1.5 }}>
+            Please keep this window open
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {PROC_STEPS.map(({ label, meta }, i) => {
+              const done   = i < step;
+              const active = i === step;
+              const pend   = i > step;
+              return (
+                <div key={label} style={{
+                  display: "flex", alignItems: "center", gap: 14,
+                  padding: "12px 0",
+                  borderBottom: i < PROC_STEPS.length - 1 ? `1px solid ${BORDER}` : "none",
+                  opacity: pend ? 0.35 : 1,
+                  transition: "opacity 0.3s",
+                  animation: active ? "step-appear 0.25s ease-out both" : "none",
+                }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                    background: done ? BRAND : active ? BRAND_L : SURFACE,
+                    border: active ? `2px solid ${BRAND}` : done ? "none" : `1.5px solid ${BORDER}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transition: "all 0.3s",
+                  }}>
+                    {done ? (
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                        <path d="M2 6.5l3 3 6-6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    ) : active ? (
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: BRAND, animation: "ring-pulse 1.4s ease-out infinite" }} />
+                    ) : (
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: BORDER }} />
+                    )}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 14, fontWeight: done || active ? 600 : 400, color: done || active ? INK : INK_3, margin: 0 }}>{label}</p>
+                    <p style={{ fontFamily: MONO, fontSize: 10, color: INK_4, margin: "2px 0 0", letterSpacing: 0.3 }}>{meta}</p>
+                  </div>
+                  {done && (
+                    <span style={{ fontFamily: MONO, fontSize: 10, color: BRAND, letterSpacing: 0.6, textTransform: "uppercase" as const }}>Done</span>
+                  )}
+                  {active && (
+                    <span style={{ fontFamily: MONO, fontSize: 10, color: BRAND, letterSpacing: 0.6, textTransform: "uppercase" as const }}>Running</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ padding: "0 20px 20px" }}>
+          <div style={{
+            padding: "12px 14px", borderRadius: R, background: SURFACE, border: `1px solid ${BORDER}`,
+            display: "flex", alignItems: "center", gap: 10,
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="7" width="10" height="7" rx="1.5" stroke={INK_3} strokeWidth="1.4" />
+              <path d="M5 7V5.5A3 3 0 0 1 11 5.5V7" stroke={INK_3} strokeWidth="1.4" fill="none" />
+            </svg>
+            <p style={{ fontFamily: MONO, fontSize: 10, color: INK_3, margin: 0, letterSpacing: 0.4 }}>
+              AES-256 · ISO 27001 · SOC 2 TYPE II
+            </p>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── SCREEN: Result ────────────────────────────────────────────────────────────
+function ResultScreen({ result, onRetry }: { result: VerificationResult; onRetry: () => void }) {
+  return (
+    <div className="animate-fade-up" style={{ padding: "0 20px 32px" }}>
+      <Card>
+        <div style={{ padding: "40px 24px 32px", textAlign: "center" }}>
           {result.success ? (
             <>
-              <AnimatedCheck />
-              <h1 style={{ fontFamily: SERIF, fontSize: 30, fontWeight: 400, color: INK, letterSpacing: -0.4, lineHeight: 1.1, margin: 0 }}>
-                Verification<br /><span style={{ fontStyle: "italic", color: TEAL_DEEP }}>submitted.</span>
-              </h1>
-              <p style={{ fontSize: 14, color: INK_2, lineHeight: 1.55, maxWidth: 280, margin: 0 }}>
-                You can close this window. We&apos;ll notify the business once confirmed.
-              </p>
-              <div style={{
-                padding: "12px 16px", borderRadius: 14, background: PAPER_SHADE,
-                display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box",
-              }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 10, background: INK,
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                }}>
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <rect x="3" y="6" width="8" height="6" rx="1" stroke="#fff" strokeWidth="1.4" />
-                    <path d="M5 6V4.5C5 3.1 6 2 7 2C8 2 9 3.1 9 4.5V6" stroke="#fff" strokeWidth="1.4" fill="none" />
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+                <div className="animate-scale-in" style={{ width: 84, height: 84 }}>
+                  <svg width="84" height="84" viewBox="0 0 84 84" fill="none">
+                    <circle cx="42" cy="42" r="38" fill={BRAND_L} />
+                    <circle cx="42" cy="42" r="34" stroke={BRAND} strokeWidth="2.5" />
+                    <path
+                      d="M26 42l11 11 21-22"
+                      stroke={BRAND} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"
+                      strokeDasharray="54" strokeDashoffset="54"
+                      className="animate-check-draw"
+                    />
                   </svg>
                 </div>
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
+                Verification submitted
+              </h2>
+              <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 24px" }}>
+                You can safely close this window.<br />
+                We&apos;ll notify the business once your identity is confirmed.
+              </p>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "13px 16px", borderRadius: R, background: OK_L,
+                border: `1px solid #6ee7b7`, textAlign: "left",
+              }}>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
+                  <circle cx="9" cy="9" r="8" fill={OK} />
+                  <path d="M5 9l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: INK }}>Your data is encrypted</div>
-                  <div style={{ fontFamily: MONO, fontSize: 10, color: INK_3, marginTop: 2, letterSpacing: 0.3 }}>
-                    AES-256 · ISO 27001 · SOC 2 Type II
-                  </div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: "#065f46", margin: 0 }}>Processing typically completes in under 60 seconds</p>
                 </div>
               </div>
             </>
           ) : (
             <>
-              <AnimatedError />
-              <h1 style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 400, color: INK, letterSpacing: -0.4, lineHeight: 1.1, margin: 0 }}>
-                Something<br /><span style={{ fontStyle: "italic", color: "#b91c1c" }}>went wrong.</span>
-              </h1>
-              <p style={{ fontSize: 14, color: INK_2, lineHeight: 1.5, maxWidth: 280, margin: 0 }}>
-                {result.error ?? "Verification failed. Please try again."}
-              </p>
-              <div style={{ width: "100%" }}>
-                <PrimaryBtn onClick={() => window.location.reload()}>Try again</PrimaryBtn>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+                <div className="animate-scale-in" style={{ width: 84, height: 84 }}>
+                  <svg width="84" height="84" viewBox="0 0 84 84" fill="none">
+                    <circle cx="42" cy="42" r="38" fill={DANGER_L} />
+                    <circle cx="42" cy="42" r="34" stroke={DANGER} strokeWidth="2.5" />
+                    <path d="M28 28l28 28M56 28L28 56" stroke={DANGER} strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                </div>
               </div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
+                Verification failed
+              </h2>
+              <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 24px" }}>
+                {result.error ?? "Something went wrong. Please try again."}
+              </p>
+              <Btn onClick={onRetry} variant="danger">Try again</Btn>
             </>
           )}
         </div>
-      </div>
-    );
-  }
-
-  const getState = (i: number): "done" | "active" | "pending" =>
-    i < currentStep ? "done" : i === currentStep ? "active" : "pending";
-
-  return (
-    <div style={{ padding: "40px 24px 0" }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-        <HourglassMark />
-        <h1 style={{
-          margin: "22px 0 0", fontFamily: SERIF, fontSize: 30, fontWeight: 400,
-          letterSpacing: -0.4, lineHeight: 1.1, color: INK,
-        }}>
-          Checking your<br />
-          <span style={{ fontStyle: "italic", color: TEAL_DEEP }}>details now.</span>
-        </h1>
-        <p style={{ margin: "10px 0 0", fontSize: 13, color: INK_2, lineHeight: 1.5, maxWidth: 280 }}>
-          This usually takes 8–15 seconds. Please keep this window open.
-        </p>
-      </div>
-
-      {/* Checklist card */}
-      <div style={{
-        marginTop: 28,
-        background: PAPER,
-        borderRadius: 18, border: `1px solid ${LINE}`,
-        padding: "4px 16px",
-      }}>
-        {PROC_STEPS.map((s, i) => (
-          <ChecklistRow key={s.label} state={getState(i)} label={s.label} meta={s.meta} />
-        ))}
-      </div>
-
-      {/* Encryption footer */}
-      <div style={{
-        marginTop: 16, paddingBottom: 40,
-        padding: "14px 16px", borderRadius: 14, background: PAPER_SHADE,
-        display: "flex", alignItems: "center", gap: 12,
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 10, background: INK,
-          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-        }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="3" y="6" width="8" height="6" rx="1" stroke="#fff" strokeWidth="1.4" />
-            <path d="M5 6V4.5C5 3.1 6 2 7 2C8 2 9 3.1 9 4.5V6" stroke="#fff" strokeWidth="1.4" fill="none" />
-          </svg>
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: INK }}>Your data is encrypted</div>
-          <div style={{ fontFamily: MONO, fontSize: 10, color: INK_3, marginTop: 2, letterSpacing: 0.3 }}>
-            AES-256 · ISO 27001 · SOC 2 Type II
-          </div>
-        </div>
-      </div>
+      </Card>
     </div>
   );
 }
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export function VerificationFlow({ token }: { token: string }) {
-  const [flowStep, setFlowStep] = useState<FlowStep>("doc-select");
-  const [dir, setDir] = useState<Direction>("forward");
-  const [country, setCountry] = useState<Country | null>(null);
-  const [docType, setDocType] = useState<DocType | null>(null);
-  const [docFront, setDocFront] = useState<string | null>(null);
+  const [flowStep, setFlowStep]   = useState<FlowStep>("detecting");
+  const [dir, setDir]             = useState<Direction>("forward");
+  const [country, setCountry]     = useState<Country | null>(null);
+  const [docType, setDocType]     = useState<DocType | null>(null);
+  const [docFront, setDocFront]   = useState<string | null>(null);
   const [docFrontQ, setDocFrontQ] = useState<string | null>(null);
-  const [docBack, setDocBack] = useState<string | null>(null);
-  const [docBackQ, setDocBackQ] = useState<string | null>(null);
-  const [selfie, setSelfie] = useState<string | null>(null);
-  const [procStep, setProcStep] = useState(0);
-  const [result, setResult] = useState<VerificationResult | null>(null);
+  const [docBack, setDocBack]     = useState<string | null>(null);
+  const [docBackQ, setDocBackQ]   = useState<string | null>(null);
+  const [selfie, setSelfie]       = useState<string | null>(null);
+  const [procStep, setProcStep]   = useState(0);
+  const [result, setResult]       = useState<VerificationResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const go = (to: FlowStep, d: Direction = "forward") => { setDir(d); setFlowStep(to); };
+  // Detect desktop on client
+  useEffect(() => {
+    const isPhone = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+    setFlowStep(isPhone ? "welcome" : "entry");
+  }, []);
 
-  const needsBack = docType === "driving_licence" || docType === "national_id";
-  const docLabel = DOC_TYPES.find((d) => d.value === docType)?.label ?? "document";
+  const go = useCallback((to: FlowStep, d: Direction = "forward") => {
+    setDir(d); setFlowStep(to);
+  }, []);
 
-  const captureDocFront = async (dataUrl: string) => {
-    setDocFront(dataUrl);
-    setDocFrontQ(await checkQuality(dataUrl));
-    go("doc-front");
+  const docInfo   = DOC_TYPES.find((d) => d.value === docType);
+  const docLabel  = docInfo?.label ?? "document";
+  const needsBack = docInfo?.hasBack ?? false;
+
+  const handleFrontCaptured = (front: string, q: string | null) => {
+    setDocFront(front); setDocFrontQ(q);
+    go("selfie");
   };
 
-  const captureDocBack = async (dataUrl: string) => {
-    setDocBack(dataUrl);
-    setDocBackQ(await checkQuality(dataUrl));
-    go("doc-back");
+  const handleBackCaptured = (back: string, q: string | null) => {
+    setDocBack(back); setDocBackQ(q);
+    go("selfie");
   };
 
   const handleSubmit = async () => {
@@ -1228,134 +1442,126 @@ export function VerificationFlow({ token }: { token: string }) {
     setSubmitting(true);
     go("processing");
     setProcStep(0);
-    await delay(850); setProcStep(1);
+    await delay(900);  setProcStep(1);
     await delay(1050); setProcStep(2);
     const [res] = await Promise.all([
       submitVerification(token, {
-        document_front: stripPrefix(docFront),
-        ...(docBack ? { document_back: stripPrefix(docBack) } : {}),
-        selfie: stripPrefix(selfie),
+        document_front: stripPfx(docFront),
+        ...(docBack ? { document_back: stripPfx(docBack) } : {}),
+        selfie: stripPfx(selfie),
         document_type: docType,
       }),
-      delay(950),
+      delay(980),
     ]);
     setProcStep(3);
-    await delay(800);
+    await delay(850);
     setProcStep(4);
-    await delay(400);
+    await delay(350);
     setResult(res);
     setSubmitting(false);
+    go("result");
   };
 
   const railStep = (): 0 | 1 | 2 | 3 => {
     if (flowStep === "doc-select") return 0;
-    if (["doc-method", "doc-front", "doc-back"].includes(flowStep)) return 1;
+    if (flowStep === "doc-capture") return 1;
     if (flowStep === "selfie") return 2;
     return 3;
   };
 
-  const isSelfieCamera = flowStep === "selfie" && !selfie;
+  const showRail = !["detecting", "entry", "welcome", "processing", "result"].includes(flowStep);
   const anim = dir === "forward" ? "animate-slide-fwd" : "animate-slide-bwd";
 
   const renderStep = () => {
-    switch (flowStep) {
-      case "doc-select":
-        return (
-          <DocSelectScreen
-            country={country} docType={docType}
-            onCountryChange={(c) => { setCountry(c); setDocType(null); setDocFront(null); setDocBack(null); }}
-            onDocTypeChange={(d) => { setDocType(d); setDocFront(null); setDocBack(null); }}
-            onNext={() => go("doc-method")}
-          />
-        );
+    if (flowStep === "detecting") return null;
 
-      case "doc-method":
-        return (
-          <DocMethodScreen
-            docLabel={docLabel} country={country} isFront={true}
-            onCapture={captureDocFront}
-            onBack={() => go("doc-select", "backward")}
-            token={token}
-          />
-        );
-
-      case "doc-front":
-        return docFront ? (
-          <DocPreviewScreen
-            title="Check the front"
-            subtitle="Ensure all corners are visible and text is legible."
-            image={docFront} quality={docFrontQ}
-            continueLabel={needsBack ? "Continue to back" : "Continue to selfie"}
-            onRetake={() => { setDocFront(null); setDocFrontQ(null); go("doc-method", "backward"); }}
-            onContinue={() => go(needsBack ? "doc-back" : "selfie")}
-          />
-        ) : null;
-
-      case "doc-back":
-        return docBack ? (
-          <DocPreviewScreen
-            title="Check the back"
-            subtitle="Ensure the back is clear and all corners are visible."
-            image={docBack} quality={docBackQ}
-            continueLabel="Continue to selfie"
-            onRetake={() => { setDocBack(null); setDocBackQ(null); }}
-            onContinue={() => go("selfie")}
-          />
-        ) : (
-          <DocMethodScreen
-            docLabel={docLabel} country={country} isFront={false}
-            onCapture={captureDocBack}
-            onBack={() => go("doc-front", "backward")}
-            token={token}
-          />
-        );
-
-      case "selfie":
-        return (
-          <SelfieScreen
-            image={selfie}
-            onCapture={setSelfie}
-            onClear={() => setSelfie(null)}
-            onSubmit={handleSubmit}
-            submitting={submitting}
-          />
-        );
-
-      case "processing":
-        return <ProcessingScreen currentStep={procStep} result={result} />;
+    if (flowStep === "entry") {
+      return <EntryScreen token={token} onContinue={() => go("welcome")} />;
     }
-  };
 
-  const backAction = (): (() => void) | undefined => {
-    if (flowStep === "doc-select" || flowStep === "processing") return undefined;
-    if (flowStep === "doc-method") return () => go("doc-select", "backward");
-    if (flowStep === "doc-front") return () => { setDocFront(null); setDocFrontQ(null); go("doc-method", "backward"); };
-    if (flowStep === "doc-back") return () => go("doc-front", "backward");
-    if (flowStep === "selfie" && selfie) return () => setSelfie(null); // go back to preview
-    if (flowStep === "selfie") return () => go(needsBack ? "doc-back" : "doc-front", "backward");
-    return undefined;
+    if (flowStep === "welcome") {
+      return <WelcomeScreen onNext={() => go("doc-select")} />;
+    }
+
+    if (flowStep === "doc-select") {
+      return (
+        <DocSelectScreen
+          country={country} docType={docType}
+          onCountry={(c) => { setCountry(c); setDocType(null); setDocFront(null); setDocBack(null); }}
+          onDocType={(d) => { setDocType(d); setDocFront(null); setDocBack(null); }}
+          onNext={() => go("doc-capture")}
+          onBack={() => go("welcome", "backward")}
+        />
+      );
+    }
+
+    if (flowStep === "doc-capture") {
+      return (
+        <DocCaptureScreen
+          docLabel={docLabel}
+          docTypeVal={docType ?? "passport"}
+          hasBack={needsBack}
+          country={country}
+          onFront={handleFrontCaptured}
+          onBack2={handleBackCaptured}
+          onBack={() => go("doc-select", "backward")}
+          token={token}
+        />
+      );
+    }
+
+    if (flowStep === "selfie") {
+      return (
+        <SelfieScreen
+          image={selfie}
+          onCapture={setSelfie}
+          onClear={() => setSelfie(null)}
+          onSubmit={handleSubmit}
+          onBack={() => go("doc-capture", "backward")}
+          submitting={submitting}
+          token={token}
+        />
+      );
+    }
+
+    if (flowStep === "processing") {
+      return <ProcessingScreen step={procStep} />;
+    }
+
+    if (flowStep === "result" && result) {
+      return <ResultScreen result={result} onRetry={() => { setResult(null); setDocFront(null); setDocBack(null); setSelfie(null); go("welcome"); }} />;
+    }
+
+    return null;
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#050a09", display: "flex", justifyContent: "center" }}>
-      <div style={{
-        width: "100%", maxWidth: 430, minHeight: "100vh",
-        background: PAPER, display: "flex", flexDirection: "column",
-        position: "relative",
-      }}>
-        {/* Status bar spacer (mobile) */}
-        <div style={{ height: 44, flexShrink: 0 }} />
+    <div style={{ minHeight: "100vh", background: BG, display: "flex", flexDirection: "column" }}>
+      <div style={{ width: "100%", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        {/* Top bar */}
+        <TopBar
+          onBack={["doc-select", "doc-capture", "selfie"].includes(flowStep) ? (() => {
+            if (flowStep === "doc-select") go("welcome", "backward");
+            else if (flowStep === "doc-capture") go("doc-select", "backward");
+            else if (flowStep === "selfie") go("doc-capture", "backward");
+          }) : undefined}
+          step={showRail ? railStep() : undefined}
+        />
 
-        {/* TopBar */}
-        <TopBar onBack={backAction()} dark={isSelfieCamera} />
-
-        {/* Progress Rail */}
-        {flowStep !== "processing" && <ProgressRail step={railStep()} />}
-
-        {/* Main content */}
-        <div key={flowStep} className={anim} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          {renderStep()}
+        {/* Content */}
+        <div style={{ flex: 1, paddingTop: showRail ? 16 : 24 }}>
+          <div key={flowStep} className={anim}>
+            {renderStep()}
+          </div>
         </div>
+
+        {/* Footer */}
+        <p style={{
+          textAlign: "center", fontSize: 11, padding: "16px 20px",
+          fontFamily: MONO, color: "rgba(255,255,255,0.08)", letterSpacing: 0.5,
+        }}>
+          Secured by Veridian · End-to-end encrypted
+        </p>
       </div>
     </div>
   );
