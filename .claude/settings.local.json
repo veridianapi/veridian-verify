@@ -13,5 +13,10 @@
     "additionalDirectories": [
       "c:\\Users\\ME\\veridian-verify\\app\\s"
     ]
-  }
+  },
+  "disabledMcpjsonServers": [
+    "nano-banana",
+    "magic",
+    "stitch"
+  ]
 }

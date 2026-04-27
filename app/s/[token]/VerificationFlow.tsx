@@ -5,40 +5,36 @@ import { submitVerification, getSession, type VerificationResult } from "./actio
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const BG       = "#050a09";
-const CARD     = "#111916";
-const BRAND    = "#1d9e75";
-const BRAND_D  = "#15805f";
-const BRAND_L  = "rgba(29,158,117,0.12)";
-const BRAND_G  = "rgba(29,158,117,0.25)";
-const INK      = "#f0f4f3";
-const INK_2    = "#c8d8d3";
-const INK_3    = "#a3b3ae";
-const INK_4    = "#5a7268";
-const BORDER   = "rgba(255,255,255,0.08)";
-const SURFACE  = "#0d1211";
+const CARD     = "#ffffff";
+const BRAND    = "#0f6e56";
+const BRAND_D  = "#0a5240";
+const BRAND_L  = "rgba(15,110,86,0.08)";
+const INK      = "#111827";
+const INK_2    = "#374151";
+const INK_3    = "#6b7280";
+const INK_4    = "#9ca3af";
+const BORDER   = "#e5e7eb";
+const SURFACE  = "#f9fafb";
 const DANGER   = "#dc2626";
-const DANGER_L = "rgba(220,38,38,0.12)";
-const WARN     = "#d97706";
-const WARN_L   = "rgba(217,119,6,0.12)";
-const OK       = "#16a34a";
-const OK_L     = "rgba(22,163,74,0.12)";
-const MONO     = 'var(--font-mono,"JetBrains Mono","SF Mono",ui-monospace,monospace)';
+const DANGER_L = "rgba(220,38,38,0.08)";
 const BTN_H    = 52;
-const R_CARD   = 20;
+const MONO     = 'var(--font-mono,"JetBrains Mono","SF Mono",ui-monospace,monospace)';
+// Dark-overlay text (camera screens)
+const INK_D    = "#f0f4f3";
+const INK_D3   = "#a3b3ae";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type FlowStep =
   | "detecting" | "entry" | "welcome"
   | "country-select" | "doc-type"
-  | "doc-capture"
-  | "uploading" | "upload-error"
+  | "doc-capture" | "uploading" | "upload-error"
   | "selfie-intro" | "selfie"
   | "processing" | "result";
 
-type Direction    = "forward" | "backward";
-type DocType      = "passport" | "national_id" | "driving_licence" | "residence_permit";
-type DocPhase     = "front-cam" | "front-review" | "back-cam" | "back-review";
-type CamStatus    = "starting" | "live" | "denied";
+type Direction     = "forward" | "backward";
+type DocType       = "passport" | "national_id" | "driving_licence" | "residence_permit";
+type DocPhase      = "front-cam" | "front-review" | "back-cam" | "back-review";
+type CamStatus     = "starting" | "live" | "denied";
 type LivenessPhase = "framing" | "checking" | "done";
 
 interface Country      { code: string; name: string; flag: string }
@@ -71,8 +67,7 @@ const DOC_TYPES: { value: DocType; label: string; hasBack: boolean }[] = [
 ];
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
-const delay     = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const stripPfx  = (s: string) => (s.includes(",") ? s.split(",")[1] : s);
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -115,7 +110,7 @@ async function checkImageQuality(dataUrl: string): Promise<string | null> {
         for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
         const brightness = sum / (d.length / 4);
         if (brightness < 40)  resolve("Image appears too dark. Try in better lighting.");
-        else if (brightness > 220) resolve("Image appears overexposed. Reduce glare or brightness.");
+        else if (brightness > 220) resolve("Image appears overexposed. Reduce glare.");
         else resolve(null);
       } catch { resolve(null); }
     };
@@ -126,10 +121,10 @@ async function checkImageQuality(dataUrl: string): Promise<string | null> {
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 function useCamera(facing: "environment" | "user") {
-  const [status, setStatus]    = useState<CamStatus>("starting");
-  const videoRef               = useRef<HTMLVideoElement>(null);
-  const canvasRef              = useRef<HTMLCanvasElement>(null);
-  const streamRef              = useRef<MediaStream | null>(null);
+  const [status, setStatus] = useState<CamStatus>("starting");
+  const videoRef            = useRef<HTMLVideoElement>(null);
+  const canvasRef           = useRef<HTMLCanvasElement>(null);
+  const streamRef           = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (!navigator?.mediaDevices?.getUserMedia) { setStatus("denied"); return; }
@@ -182,7 +177,7 @@ function useFrameQuality(videoRef: React.RefObject<HTMLVideoElement | null>, act
   return quality;
 }
 
-// ─── SVG Icons & Marks ───────────────────────────────────────────────────────
+// ─── Shared Primitives ────────────────────────────────────────────────────────
 function VeridianMark({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={Math.round(size * 1.1)} viewBox="0 0 28 31" fill="none" aria-hidden="true">
@@ -200,17 +195,6 @@ function ChevronRight() {
   );
 }
 
-function DocIcon({ color = BRAND }: { color?: string }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="2.5" y="1.5" width="11" height="13" rx="2" stroke={color} strokeWidth="1.4" />
-      <line x1="5" y1="6" x2="11" y2="6" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
-      <line x1="5" y1="9" x2="9" y2="9" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-// ─── Primitives ───────────────────────────────────────────────────────────────
 function Btn({ onClick, disabled, loading, children, variant = "primary", small }: {
   onClick?: () => void; disabled?: boolean; loading?: boolean;
   children?: React.ReactNode;
@@ -219,20 +203,19 @@ function Btn({ onClick, disabled, loading, children, variant = "primary", small 
 }) {
   const h = small ? 36 : BTN_H;
   const base: React.CSSProperties = {
-    width: "100%", minHeight: h, borderRadius: 999,
-    border: "none", cursor: disabled || loading ? "not-allowed" : "pointer",
+    width: "100%", minHeight: h, borderRadius: 999, border: "none",
+    cursor: disabled || loading ? "not-allowed" : "pointer",
     fontWeight: 600, fontSize: small ? 14 : 16,
     display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
     transition: "opacity 0.15s",
   };
   const variants: Record<string, React.CSSProperties> = {
     primary: {
-      background: disabled || loading ? "rgba(29,158,117,0.3)" : BRAND,
-      color: disabled || loading ? "rgba(240,244,243,0.4)" : BG,
+      background: disabled || loading ? "rgba(15,110,86,0.3)" : BRAND,
+      color: disabled || loading ? "rgba(255,255,255,0.4)" : "#fff",
     },
     ghost: {
-      background: "transparent",
-      color: INK_3,
+      background: "transparent", color: disabled ? INK_4 : INK_3,
       border: `1px solid ${BORDER}`,
     },
     outline: {
@@ -241,9 +224,43 @@ function Btn({ onClick, disabled, loading, children, variant = "primary", small 
       border: `1.5px solid ${disabled ? BORDER : BRAND}`,
     },
     danger: {
-      background: DANGER_L,
-      color: DANGER,
-      border: `1px solid rgba(220,38,38,0.3)`,
+      background: DANGER_L, color: DANGER,
+      border: `1px solid rgba(220,38,38,0.2)`,
+    },
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={disabled || loading}
+      style={{ ...base, ...variants[variant] }}>
+      {loading ? (
+        <svg style={{ animation: "spin 0.9s linear infinite" }} width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="8" stroke="rgba(0,0,0,0.1)" strokeWidth="2.5" />
+          <path d="M10 2a8 8 0 0 1 8 8" stroke={variant === "primary" ? "#fff" : BRAND} strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+      ) : children}
+    </button>
+  );
+}
+
+function DarkBtn({ onClick, disabled, loading, children, variant = "primary" }: {
+  onClick?: () => void; disabled?: boolean; loading?: boolean;
+  children?: React.ReactNode; variant?: "primary" | "ghost";
+}) {
+  const base: React.CSSProperties = {
+    width: "100%", minHeight: BTN_H, borderRadius: 999, border: "none",
+    cursor: disabled || loading ? "not-allowed" : "pointer",
+    fontWeight: 600, fontSize: 16,
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    transition: "opacity 0.15s",
+  };
+  const variants: Record<string, React.CSSProperties> = {
+    primary: {
+      background: disabled || loading ? "rgba(15,110,86,0.3)" : BRAND,
+      color: disabled || loading ? "rgba(255,255,255,0.4)" : "#fff",
+    },
+    ghost: {
+      background: "rgba(255,255,255,0.08)",
+      color: "rgba(255,255,255,0.7)",
+      border: "1px solid rgba(255,255,255,0.12)",
     },
   };
   return (
@@ -252,112 +269,90 @@ function Btn({ onClick, disabled, loading, children, variant = "primary", small 
       {loading ? (
         <svg style={{ animation: "spin 0.9s linear infinite" }} width="20" height="20" viewBox="0 0 20 20" fill="none">
           <circle cx="10" cy="10" r="8" stroke="rgba(255,255,255,0.15)" strokeWidth="2.5" />
-          <path d="M10 2a8 8 0 0 1 8 8" stroke={variant === "primary" ? BG : BRAND} strokeWidth="2.5" strokeLinecap="round" />
+          <path d="M10 2a8 8 0 0 1 8 8" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
         </svg>
       ) : children}
     </button>
   );
 }
 
-function IconBtn({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
+function IconBtn({ onClick, label, children, dark = false }: {
+  onClick: () => void; label: string; children: React.ReactNode; dark?: boolean;
+}) {
   return (
     <button type="button" onClick={onClick} aria-label={label} style={{
       all: "unset", cursor: "pointer",
       width: 36, height: 36, borderRadius: 8,
-      background: "rgba(255,255,255,0.07)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
+      background: dark ? "rgba(255,255,255,0.07)" : "transparent",
+      border: dark ? "none" : `1px solid ${BORDER}`,
+      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
     }}>
       {children}
     </button>
   );
 }
 
-function PillLabel({ children }: { children: React.ReactNode }) {
+function ProgressDots({ step }: { step: 0 | 1 }) {
   return (
-    <div style={{
-      display: "inline-flex", alignItems: "center", justifyContent: "center",
-      padding: "8px 16px", borderRadius: 999,
-      background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)",
-      color: INK, fontSize: 14, fontWeight: 500, lineHeight: 1.4,
-      textAlign: "center",
-    }}>
-      {children}
-    </div>
-  );
-}
-
-// ─── Progress pill ─────────────────────────────────────────────────────────────
-function ProgressPill({ step }: { step: 0 | 1 }) {
-  return (
-    <div style={{ display: "flex", gap: 6, padding: "0 4px", marginTop: 10 }}>
-      {(["ID", "Selfie"] as const).map((label, i) => (
-        <div key={label} style={{ flex: 1 }}>
-          <div style={{
-            height: 3, borderRadius: 2, marginBottom: 5,
-            background: i <= step ? BRAND : "rgba(255,255,255,0.10)",
-            transition: "background 0.25s",
-          }} />
-          <span style={{
-            fontFamily: MONO, fontSize: 9, letterSpacing: 0.8,
-            textTransform: "uppercase" as const,
-            color: i === step ? BRAND : i < step ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.15)",
-            fontWeight: i === step ? 600 : 400,
-          }}>{label}</span>
-        </div>
+    <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "center", marginTop: 12 }}>
+      {[0, 1].map((i) => (
+        <div key={i} style={{
+          height: 6, borderRadius: 3,
+          width: i === step ? 20 : 6,
+          background: i <= step ? BRAND : BORDER,
+          transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+        }} />
       ))}
     </div>
   );
 }
 
-// ─── Top Bar ─────────────────────────────────────────────────────────────────
-function TopBar({ onBack, onClose, progress }: {
-  onBack?: () => void; onClose?: () => void; progress?: 0 | 1;
+function TopBar({ onBack, onClose, progress, dark = false }: {
+  onBack?: () => void; onClose?: () => void; progress?: 0 | 1; dark?: boolean;
 }) {
+  const iconStroke = dark ? "rgba(255,255,255,0.7)" : INK_3;
   return (
-    <div style={{ padding: "14px 20px 0" }}>
+    <div style={{ padding: "16px 20px 0" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         {onBack ? (
-          <IconBtn onClick={onBack} label="Back">
+          <IconBtn onClick={onBack} label="Back" dark={dark}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M10 3L5 8l5 5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 3L5 8l5 5" stroke={iconStroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </IconBtn>
         ) : <div style={{ width: 36 }} />}
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
           <VeridianMark size={18} />
-          <span style={{ fontWeight: 700, fontSize: 14, color: INK, letterSpacing: -0.2 }}>Veridian</span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: dark ? INK_D : INK, letterSpacing: -0.2 }}>Veridian</span>
         </div>
         {onClose ? (
-          <IconBtn onClick={onClose} label="Close">
+          <IconBtn onClick={onClose} label="Close" dark={dark}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M1 1l12 12M13 1L1 13" stroke="rgba(255,255,255,0.7)" strokeWidth="1.8" strokeLinecap="round" />
+              <path d="M1 1l12 12M13 1L1 13" stroke={iconStroke} strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </IconBtn>
         ) : <div style={{ width: 36 }} />}
       </div>
-      {progress !== undefined && <ProgressPill step={progress} />}
+      {progress !== undefined && <ProgressDots step={progress} />}
     </div>
   );
 }
 
-// ─── Exit Confirmation Dialog ─────────────────────────────────────────────────
 function ExitDialog({ onContinue, onExit }: { onContinue: () => void; onExit: () => void }) {
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 200,
-      background: "rgba(0,0,0,0.72)", backdropFilter: "blur(4px)",
+      background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "flex-end", justifyContent: "center",
-      padding: "0 0 env(safe-area-inset-bottom,0)",
     }}>
       <div className="animate-sheet-up" style={{
         width: "100%", maxWidth: 480,
         background: CARD, borderRadius: "20px 20px 0 0",
         border: `1px solid ${BORDER}`, borderBottom: "none",
-        padding: "24px 20px 32px",
+        padding: "24px 20px 40px",
       }}>
-        <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)", margin: "0 auto 20px" }} />
-        <h3 style={{ fontSize: 18, fontWeight: 600, color: INK, margin: "0 0 8px", textAlign: "center" }}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: BORDER, margin: "0 auto 20px" }} />
+        <h3 style={{ fontSize: 18, fontWeight: 700, color: INK, margin: "0 0 8px", textAlign: "center" }}>
           Exit verification?
         </h3>
         <p style={{ fontSize: 14, color: INK_3, textAlign: "center", margin: "0 0 24px", lineHeight: 1.55 }}>
@@ -365,14 +360,13 @@ function ExitDialog({ onContinue, onExit }: { onContinue: () => void; onExit: ()
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <Btn onClick={onContinue}>Continue verification</Btn>
-          <Btn variant="danger" onClick={onExit}>Exit</Btn>
+          <Btn variant="ghost" onClick={onExit}>Exit</Btn>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Camera overlay — doc viewfinder ──────────────────────────────────────────
 function DocViewfinder({ isPassport, detected }: { isPassport: boolean; detected: boolean }) {
   const rW = isPassport ? 0.62 : 0.84;
   const rH = isPassport ? 0.68 : 0.52;
@@ -398,387 +392,242 @@ function DocViewfinder({ isPassport, detected }: { isPassport: boolean; detected
         const sx = i % 2 === 0 ? 1 : -1;
         const sy = i < 2 ? 1 : -1;
         return (
-          <path key={i}
-            d={`M${cx + sx * bl} ${cy} L${cx} ${cy} L${cx} ${cy + sy * bl}`}
-            stroke={frameColor} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none"
-            style={{ transition: "stroke 0.3s" }} />
+          <g key={i} stroke={frameColor} strokeWidth="2.5" strokeLinecap="round"
+            style={{ transition: "stroke 0.3s" }}>
+            <line x1={cx} y1={cy} x2={cx + sx * bl} y2={cy} />
+            <line x1={cx} y1={cy} x2={cx} y2={cy + sy * bl} />
+          </g>
         );
       })}
     </svg>
   );
 }
 
-// ─── Camera overlay — face oval ───────────────────────────────────────────────
-function FaceOverlay({ liveness }: { liveness: LivenessPhase; progress: number }) {
-  return (
-    <svg className="absolute inset-0 w-full h-full pointer-events-none"
-      viewBox="0 0 300 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <defs>
-        <mask id="face-mask">
-          <rect width="300" height="400" fill="white" />
-          <ellipse cx="150" cy="188" rx="104" ry="132" fill="black" />
-        </mask>
-      </defs>
-      <rect width="300" height="400" fill="rgba(0,0,0,0.52)" mask="url(#face-mask)" />
-      <ellipse cx="150" cy="188" rx="104" ry="132" fill="none"
-        stroke={liveness === "checking" ? BRAND : "rgba(255,255,255,0.55)"}
-        strokeWidth="2"
-        strokeDasharray={liveness === "checking" ? "10 5" : "none"}
-        style={{
-          transition: "stroke 0.3s",
-          animation: liveness === "checking" ? "liveness-spin 2s linear infinite" : "none",
-          transformOrigin: "150px 188px",
-        }} />
-      {liveness === "framing" && <>
-        <path d="M62 56 L46 56 L46 72"  stroke="rgba(255,255,255,0.7)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M238 56 L254 56 L254 72" stroke="rgba(255,255,255,0.7)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M62 320 L46 320 L46 304" stroke="rgba(255,255,255,0.7)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M238 320 L254 320 L254 304" stroke="rgba(255,255,255,0.7)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-      </>}
-    </svg>
-  );
-}
+// ─── Screens ─────────────────────────────────────────────────────────────────
 
-// ─── Capture flash ─────────────────────────────────────────────────────────────
-function CaptureFlash({ visible }: { visible: boolean }) {
-  return (
-    <div style={{
-      position: "absolute", inset: 0,
-      background: "#fff", opacity: visible ? 1 : 0, pointerEvents: "none",
-      transition: visible ? "none" : "opacity 0.22s ease-out",
-      zIndex: 30,
-    }} />
-  );
-}
+function EntryScreen({ token, businessName }: { token: string; businessName?: string }) {
+  const [copied, setCopied] = useState(false);
+  const [url, setUrl] = useState("");
 
-// ─── SCREEN: Entry (desktop QR + polling) ─────────────────────────────────────
-function EntryScreen({ token, onMobileComplete }: { token: string; onMobileComplete: (result: VerificationResult) => void }) {
-  const [pageUrl, setPageUrl]   = useState("");
-  const [copied, setCopied]     = useState(false);
-  const [polled, setPolled]     = useState(false);
+  useEffect(() => { setUrl(window.location.href); }, []);
 
-  useEffect(() => { setPageUrl(window.location.href); }, []);
-
-  // Poll for session completion every 2s
-  useEffect(() => {
-    let id: ReturnType<typeof setInterval>;
-    id = setInterval(async () => {
-      try {
-        const session = await getSession(token);
-        if (session && (session.status === "approved" || session.status === "complete" || session.status === "rejected")) {
-          clearInterval(id);
-          setPolled(true);
-          const success = session.status === "approved" || session.status === "complete";
-          onMobileComplete({
-            success,
-            error: success ? undefined : "Verification was unsuccessful.",
-          });
-        }
-      } catch { /* noop — keep polling */ }
-    }, 2000);
-    return () => clearInterval(id);
-  }, [token, onMobileComplete]);
-
-  const qrSrc = pageUrl
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pageUrl)}`
+  const qrUrl = url
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}&bgcolor=0d1a14&color=0f6e56&margin=12`
     : "";
 
-  const handleCopy = () => {
-    if (!pageUrl) return;
-    navigator.clipboard?.writeText(pageUrl).then(() => {
+  const copy = () => {
+    navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
   };
 
   return (
-    <div className="animate-fade-up" style={{ padding: "0 20px 40px" }}>
+    <div style={{
+      minHeight: "100dvh", background: BG,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "40px 24px",
+    }}>
       <div style={{
-        background: "#0d1a14", borderRadius: R_CARD,
-        border: `1px solid rgba(29,158,117,0.15)`,
-        overflow: "hidden",
+        maxWidth: 400, width: "100%",
+        background: "#0d1a14", borderRadius: 24,
+        border: "1px solid rgba(15,110,86,0.2)",
+        padding: "40px 32px", textAlign: "center",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
       }}>
-        <div style={{ padding: "36px 28px 8px", textAlign: "center" }}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-            <VeridianMark size={44} />
-          </div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
-            Continue on your phone
-          </h1>
-          <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 24px", maxWidth: 260, marginLeft: "auto", marginRight: "auto" }}>
-            Scan to open on a device with a camera. No app download required.
-          </p>
-          <div style={{
-            display: "inline-flex", padding: 12,
-            background: "#fff", borderRadius: 16, marginBottom: 20,
-          }}>
-            {qrSrc ? (
-              <img src={qrSrc} alt="Verification QR code" width={200} height={200}
-                style={{ display: "block", borderRadius: 8 }} />
-            ) : (
-              <div style={{ width: 200, height: 200, borderRadius: 8, background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg style={{ animation: "spin 0.9s linear infinite" }} width="28" height="28" viewBox="0 0 28 28" fill="none">
-                  <circle cx="14" cy="14" r="11" stroke="#e5e7eb" strokeWidth="2.5" />
-                  <path d="M14 3a11 11 0 0 1 11 11" stroke={BRAND} strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-              </div>
-            )}
-          </div>
-
-          {/* Polling status */}
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            padding: "10px 16px", borderRadius: 999,
-            background: "rgba(255,255,255,0.05)",
-            marginBottom: 20,
-          }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: "50%", background: BRAND, flexShrink: 0,
-              animation: "ring-pulse 2s ease-out infinite",
-            }} />
-            <span style={{ fontSize: 13, color: INK_3 }}>Waiting for your phone…</span>
-          </div>
-
-          <button type="button" onClick={handleCopy} style={{
-            all: "unset", cursor: "pointer", boxSizing: "border-box",
-            display: "inline-flex", alignItems: "center", gap: 8,
-            padding: "10px 24px", borderRadius: 999,
-            border: "1.5px solid rgba(255,255,255,0.12)",
-            background: "rgba(255,255,255,0.06)",
-            fontSize: 13, fontWeight: 600,
-            color: copied ? "#4ade80" : INK_3,
-            transition: "all 0.15s",
-            marginBottom: 28,
-          }}>
-            {copied ? (
-              <>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M2 7l3.5 3.5L12 3" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Copied!
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M4 3h5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke={INK_3} strokeWidth="1.3" />
-                  <path d="M6 3V2h4a1 1 0 0 1 1 1v7" stroke={INK_3} strokeWidth="1.3" strokeLinecap="round" />
-                </svg>
-                Copy link
-              </>
-            )}
-          </button>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+          <VeridianMark size={40} />
         </div>
-
-        <div style={{ padding: "0 28px 28px" }}>
-          <p style={{ fontFamily: MONO, fontSize: 10, color: "rgba(255,255,255,0.15)", letterSpacing: 0.5, textAlign: "center", margin: 0 }}>
-            Secured by Veridian · End-to-end encrypted
-          </p>
-        </div>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: INK_D, margin: "0 0 8px", letterSpacing: -0.5 }}>
+          {businessName ? `Verify for ${businessName}` : "Identity Verification"}
+        </h1>
+        <p style={{ fontSize: 14, color: INK_D3, margin: "0 0 28px", lineHeight: 1.55 }}>
+          Scan with your phone to complete verification
+        </p>
+        {qrUrl && (
+          <div style={{
+            display: "inline-block", borderRadius: 16, overflow: "hidden",
+            border: "3px solid rgba(15,110,86,0.25)",
+            boxShadow: "0 0 40px rgba(15,110,86,0.12)", marginBottom: 24,
+          }}>
+            <img src={qrUrl} width={180} height={180} alt="Scan to verify" />
+          </div>
+        )}
+        <p style={{ fontSize: 12, color: "rgba(163,179,174,0.5)", margin: "0 0 16px", fontFamily: MONO }}>
+          or copy link to share
+        </p>
+        <button onClick={copy} style={{
+          background: "rgba(15,110,86,0.12)", border: "1px solid rgba(15,110,86,0.25)",
+          color: INK_D3, borderRadius: 999, padding: "10px 20px",
+          fontSize: 13, fontWeight: 500, cursor: "pointer",
+          display: "inline-flex", alignItems: "center", gap: 6,
+        }}>
+          {copied ? "✓ Copied!" : "Copy link"}
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── SCREEN: Welcome ──────────────────────────────────────────────────────────
-function WelcomeScreen({ onNext }: { onNext: () => void }) {
+function WelcomeScreen({ businessName, onStart, onClose }: {
+  businessName?: string; onStart: () => void; onClose: () => void;
+}) {
+  const features = [
+    { icon: "🪪", title: "Government ID", desc: "Passport or driver's license" },
+    { icon: "📷", title: "Quick selfie",   desc: "10-second liveness check" },
+    { icon: "🔒", title: "Secure & private", desc: "Bank-grade encryption" },
+  ];
   return (
-    <div className="animate-fade-up" style={{ padding: "0 20px 40px" }}>
-      <div style={{
-        background: CARD, borderRadius: R_CARD,
-        border: `1px solid ${BORDER}`, padding: "36px 24px 28px",
-      }}>
-        {/* Shield */}
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
-          <div style={{ position: "relative", width: 72, height: 72, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ position: "absolute", width: 72, height: 72, borderRadius: "50%", background: BRAND, opacity: 0.07, animation: "ring-pulse 3s ease-out infinite" }} />
-            <div style={{ width: 56, height: 56, borderRadius: 16, background: BRAND_L, border: `1px solid ${BRAND_G}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <VeridianMark size={28} />
-            </div>
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      <TopBar onClose={onClose} />
+      <div style={{ flex: 1, padding: "32px 20px 0", display: "flex", flexDirection: "column" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: 20,
+            background: `linear-gradient(135deg, ${BRAND} 0%, ${BRAND_D} 100%)`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 20px",
+            boxShadow: `0 8px 32px rgba(15,110,86,0.25)`,
+          }}>
+            <svg width="36" height="40" viewBox="0 0 36 40" fill="none">
+              <path d="M18 2L32 7V18C32 28 25 34 18 37C11 34 4 28 4 18V7L18 2Z"
+                fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" />
+              <path d="M11 19l5 5 9-9" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
+          <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, margin: "0 0 10px", letterSpacing: -0.5, lineHeight: 1.2 }}>
+            {businessName ? `${businessName} needs to verify your identity` : "Verify your identity"}
+          </h1>
+          <p style={{ fontSize: 15, color: INK_3, margin: 0, lineHeight: 1.55 }}>
+            Quick and secure — takes about 2 minutes
+          </p>
         </div>
-
-        <h1 style={{ fontSize: 28, fontWeight: 600, color: INK, letterSpacing: -0.5, textAlign: "center", margin: "0 0 8px" }}>
-          Verify your identity
-        </h1>
-        <p style={{ fontSize: 15, color: INK_3, textAlign: "center", lineHeight: 1.6, margin: "0 0 28px" }}>
-          Secure, private, takes under 2 minutes.
-        </p>
-
-        {/* Icon cards */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
-          {[
-            { icon: "🪪", label: "ID Document" },
-            { icon: "📷", label: "Selfie" },
-            { icon: "✅", label: "Done" },
-          ].map(({ icon, label }) => (
-            <div key={label} style={{
-              flex: 1, background: SURFACE, borderRadius: 12,
-              border: `1px solid ${BORDER}`,
-              padding: "14px 8px 12px", textAlign: "center",
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {features.map((f) => (
+            <div key={f.icon} style={{
+              display: "flex", alignItems: "center", gap: 14,
+              padding: "14px 16px", borderRadius: 12,
+              background: SURFACE, border: `1px solid ${BORDER}`,
             }}>
-              <span style={{ fontSize: 22 }}>{icon}</span>
-              <span style={{ fontSize: 11, fontWeight: 500, color: INK_3, lineHeight: 1.3 }}>{label}</span>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10, fontSize: 20,
+                background: BRAND_L, display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+              }}>{f.icon}</div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: INK, lineHeight: 1.3 }}>{f.title}</div>
+                <div style={{ fontSize: 13, color: INK_3, marginTop: 1 }}>{f.desc}</div>
+              </div>
             </div>
           ))}
         </div>
-
-        <Btn onClick={onNext}>Start verification</Btn>
-
-        {/* Consent */}
-        <p style={{ fontSize: 13, color: INK_4, textAlign: "center", lineHeight: 1.55, margin: "16px 0 0" }}>
-          By continuing, you consent to Veridian processing your biometric data to verify your identity.{" "}
-          <a href="https://veridianapi.com/privacy" target="_blank" rel="noopener noreferrer"
-            style={{ color: BRAND, textDecoration: "none", fontWeight: 500 }}>
-            Read our Privacy Policy.
-          </a>
+        <p style={{ fontSize: 12, color: INK_4, textAlign: "center", lineHeight: 1.6, margin: 0 }}>
+          By continuing you agree to biometric data processing. Your data is encrypted and never sold.
         </p>
+      </div>
+      <div style={{ padding: "20px 20px 40px" }}>
+        <Btn onClick={onStart}>Start verification</Btn>
+      </div>
+    </div>
+  );
+}
 
-        {/* Footer */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 20 }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <rect x="2" y="5.5" width="8" height="5.5" rx="1" stroke={INK_4} strokeWidth="1.1" />
-            <path d="M4 5.5V4C4 2.6 4.9 1.5 6 1.5S8 2.6 8 4v1.5" stroke={INK_4} strokeWidth="1.1" fill="none" />
+function CountrySelectScreen({ onSelect, onBack, onClose }: {
+  onSelect: (c: Country) => void; onBack: () => void; onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Country | null>(null);
+  const filtered = COUNTRIES.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      <TopBar onBack={onBack} onClose={onClose} />
+      <div style={{ flex: 1, padding: "24px 20px", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: INK, margin: "0 0 6px", letterSpacing: -0.4 }}>
+          Select your country
+        </h2>
+        <p style={{ fontSize: 14, color: INK_3, margin: "0 0 20px" }}>Choose where your ID was issued</p>
+        <div style={{ position: "relative", marginBottom: 12 }}>
+          <svg style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+            width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="7" cy="7" r="5" stroke={INK_4} strokeWidth="1.5" />
+            <path d="M11 11l3 3" stroke={INK_4} strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-          <span style={{ fontFamily: MONO, fontSize: 11, color: INK_4, letterSpacing: 0.3 }}>Secured by Veridian</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── SCREEN: Country Select ────────────────────────────────────────────────────
-function CountrySelectScreen({ value, onChange, onNext, onBack, onClose }: {
-  value: Country | null; onChange: (c: Country) => void;
-  onNext: () => void; onBack: () => void; onClose: () => void;
-}) {
-  const [q, setQ]       = useState("");
-  const [open, setOpen] = useState(false);
-  const inputRef        = useRef<HTMLInputElement>(null);
-  const filtered        = q ? COUNTRIES.filter((c) => c.name.toLowerCase().includes(q.toLowerCase())) : COUNTRIES;
-
-  useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
-
-  return (
-    <div className="animate-slide-fwd" style={{ padding: "0 20px 40px" }}>
-      <TopBar onBack={onBack} onClose={onClose} progress={0} />
-      <div style={{ padding: "24px 0 0" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: INK, letterSpacing: -0.4, margin: "0 0 6px" }}>
-          Which country issued your ID?
-        </h2>
-        <p style={{ fontSize: 14, color: INK_3, margin: "0 0 24px", lineHeight: 1.55 }}>
-          We&apos;ll show document types available in your country.
-        </p>
-
-        {/* Country dropdown */}
-        <div>
-          <button type="button" onClick={() => setOpen((o) => !o)} style={{
-            all: "unset", cursor: "pointer", boxSizing: "border-box",
-            width: "100%", minHeight: 52, borderRadius: 16, padding: "0 16px",
-            display: "flex", alignItems: "center", gap: 12,
-            background: SURFACE, border: `1.5px solid ${open ? BRAND : BORDER}`,
-            transition: "border-color 0.15s",
-          }}>
-            {value && <span style={{ fontSize: 22 }}>{value.flag}</span>}
-            <span style={{ flex: 1, fontSize: 15, fontWeight: 500, color: value ? INK : INK_4 }}>
-              {value ? value.name : "Select country"}
-            </span>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
-              <path d="M4 6l4 4 4-4" stroke={INK_4} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-
-          {open && (
-            <div style={{
-              marginTop: 6, borderRadius: 16, overflow: "hidden",
-              border: `1px solid ${BORDER}`, background: SURFACE,
-            }}>
-              <div style={{ padding: "10px 12px", borderBottom: `1px solid ${BORDER}` }}>
-                <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search…" style={{
-                    width: "100%", outline: "none",
-                    border: `1px solid ${BORDER}`, borderRadius: 10,
-                    padding: "8px 12px", fontSize: 14, boxSizing: "border-box",
-                    background: CARD, color: INK,
-                  }} />
-              </div>
-              <div style={{ maxHeight: 240, overflowY: "auto" }}>
-                {filtered.length === 0 && (
-                  <p style={{ textAlign: "center", padding: 16, fontSize: 13, color: INK_3 }}>No results</p>
-                )}
-                {filtered.map((c) => (
-                  <button key={c.code} type="button"
-                    onClick={() => { onChange(c); setOpen(false); setQ(""); }}
-                    style={{
-                      all: "unset", cursor: "pointer", boxSizing: "border-box",
-                      width: "100%", padding: "12px 16px",
-                      display: "flex", alignItems: "center", gap: 12,
-                      background: value?.code === c.code ? BRAND_L : "transparent",
-                      borderBottom: `1px solid ${BORDER}`,
-                    }}>
-                    <span style={{ fontSize: 20 }}>{c.flag}</span>
-                    <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: INK }}>{c.name}</span>
-                    {value?.code === c.code && (
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M2 7l3.5 3.5L9 3" stroke={BRAND} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: 24 }}>
-          <Btn onClick={onNext} disabled={!value}>Continue</Btn>
-        </div>
-        <div style={{ textAlign: "center", marginTop: 16 }}>
-          <a href="mailto:support@veridianapi.com" style={{ fontSize: 14, color: INK_4, textDecoration: "none" }}>
-            Need help?
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── SCREEN: Doc Type Select ──────────────────────────────────────────────────
-function DocTypeScreen({ country, onSelect, onBack, onClose }: {
-  country: Country | null; onSelect: (d: DocType) => void; onBack: () => void; onClose: () => void;
-}) {
-  return (
-    <div className="animate-slide-fwd" style={{ padding: "0 20px 40px" }}>
-      <TopBar onBack={onBack} onClose={onClose} progress={0} />
-      <div style={{ padding: "24px 0 0" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: INK, letterSpacing: -0.4, margin: "0 0 6px" }}>
-          Choose your document type
-        </h2>
-        <p style={{ fontSize: 14, color: INK_3, margin: "0 0 20px", lineHeight: 1.55 }}>
-          Make sure your document isn&apos;t expired and clearly shows your name and date of birth.
-        </p>
-        {country && (
-          <div style={{
-            display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 12px",
-            borderRadius: 999, background: BRAND_L, marginBottom: 16,
-          }}>
-            <span style={{ fontSize: 18 }}>{country.flag}</span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: INK_2 }}>{country.name}</span>
-          </div>
-        )}
-        <div style={{ background: CARD, borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-          {DOC_TYPES.map((dt, i) => (
-            <button key={dt.value} type="button" onClick={() => onSelect(dt.value)} style={{
-              all: "unset", cursor: "pointer", boxSizing: "border-box",
-              width: "100%", minHeight: 52, padding: "0 16px",
-              display: "flex", alignItems: "center", gap: 14,
-              borderBottom: i < DOC_TYPES.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none",
-              transition: "background 0.12s",
+          <input type="text" placeholder="Search countries…"
+            value={query} onChange={(e) => setQuery(e.target.value)}
+            style={{
+              width: "100%", height: 44, borderRadius: 10,
+              border: `1.5px solid ${BORDER}`, background: SURFACE,
+              paddingLeft: 40, paddingRight: 16, fontSize: 15, color: INK,
+              outline: "none", boxSizing: "border-box",
             }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(29,158,117,0.06)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}>
-              <DocIcon color={BRAND} />
-              <span style={{ flex: 1, fontSize: 15, fontWeight: 500, color: INK }}>{dt.label}</span>
+          />
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", borderRadius: 12, border: `1px solid ${BORDER}` }}>
+          {filtered.map((c, i) => (
+            <button key={c.code} type="button" onClick={() => setSelected(c)}
+              style={{
+                all: "unset", display: "flex", alignItems: "center", gap: 12,
+                width: "100%", padding: "14px 16px", cursor: "pointer",
+                borderBottom: i < filtered.length - 1 ? `1px solid ${BORDER}` : "none",
+                background: selected?.code === c.code ? BRAND_L : "transparent",
+                boxSizing: "border-box",
+              }}>
+              <span style={{ fontSize: 22 }}>{c.flag}</span>
+              <span style={{ flex: 1, fontSize: 15, color: INK, fontWeight: 500 }}>{c.name}</span>
+              {selected?.code === c.code && (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8l4 4 6-6" stroke={BRAND} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: "12px 20px 40px" }}>
+        <Btn onClick={() => selected && onSelect(selected)} disabled={!selected}>Continue</Btn>
+      </div>
+    </div>
+  );
+}
+
+function DocTypeScreen({ onSelect, onBack, onClose }: {
+  onSelect: (dt: DocType, hasBack: boolean) => void; onBack: () => void; onClose: () => void;
+}) {
+  return (
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      <TopBar onBack={onBack} onClose={onClose} progress={0} />
+      <div style={{ flex: 1, padding: "24px 20px" }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: INK, margin: "0 0 6px", letterSpacing: -0.4 }}>
+          Choose document type
+        </h2>
+        <p style={{ fontSize: 14, color: INK_3, margin: "0 0 24px" }}>Select a valid government-issued ID</p>
+        <div style={{ borderRadius: 14, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
+          {DOC_TYPES.map((dt, i) => (
+            <button key={dt.value} type="button" onClick={() => onSelect(dt.value, dt.hasBack)}
+              style={{
+                all: "unset", display: "flex", alignItems: "center", gap: 14,
+                width: "100%", padding: "16px 16px", cursor: "pointer",
+                borderBottom: i < DOC_TYPES.length - 1 ? `1px solid ${BORDER}` : "none",
+                background: "transparent", boxSizing: "border-box",
+              }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10,
+                background: BRAND_L, border: `1px solid rgba(15,110,86,0.2)`,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <rect x="2" y="3" width="14" height="12" rx="2.5" stroke={BRAND} strokeWidth="1.5" />
+                  <line x1="5" y1="8" x2="13" y2="8" stroke={BRAND} strokeWidth="1.2" strokeLinecap="round" />
+                  <line x1="5" y1="11" x2="9" y2="11" stroke={BRAND} strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>{dt.label}</div>
+                <div style={{ fontSize: 12, color: INK_4, marginTop: 2 }}>
+                  {dt.hasBack ? "Front & back required" : "Front only"}
+                </div>
+              </div>
               <ChevronRight />
             </button>
           ))}
@@ -788,790 +637,524 @@ function DocTypeScreen({ country, onSelect, onBack, onClose }: {
   );
 }
 
-// ─── SCREEN: Doc Capture (full-screen camera + review) ────────────────────────
-function DocCaptureScreen({ docLabel, docTypeVal, hasBack, onComplete, onBack, onClose }: {
-  docLabel: string; docTypeVal: DocType; hasBack: boolean;
-  onComplete: (front: string, frontQ: string | null, back: string | null, backQ: string | null) => void;
+function DocCaptureScreen({ docType, phase, onCapture, onBack, onClose }: {
+  docType: DocType; phase: DocPhase;
+  onCapture: (img: string, quality: string | null) => void;
   onBack: () => void; onClose: () => void;
 }) {
-  const [phase, setPhase]       = useState<DocPhase>("front-cam");
-  const [frontImg, setFrontImg] = useState<string | null>(null);
-  const [frontQ, setFrontQ]     = useState<string | null>(null);
-  const [backImg, setBackImg]   = useState<string | null>(null);
-  const [backQ, setBackQ]       = useState<string | null>(null);
-  const [autocapture, setAutocapture] = useState(false);
-  const [flash, setFlash]       = useState(false);
-  const [camKey, setCamKey]     = useState(0);
-  const libRef                  = useRef<HTMLInputElement>(null);
-
+  const isFront    = phase === "front-cam" || phase === "front-review";
+  const isPassport = docType === "passport";
   const { status, videoRef, canvasRef, capture } = useCamera("environment");
   const quality = useFrameQuality(videoRef, status === "live");
+  const [review, setReview]       = useState<string | null>(null);
+  const [autocapture, setAuto]    = useState(true);
+  const autoFiredRef              = useRef(false);
+  const fileRef                   = useRef<HTMLInputElement>(null);
 
-  // Autocapture: fire when quality is good and autocapture is on
-  const autoFired = useRef(false);
+  const good = quality
+    ? quality.brightness >= 40 && quality.brightness <= 215 && quality.variance >= 120
+    : false;
+
   useEffect(() => {
-    if (!autocapture || !quality) return;
-    const good = quality.brightness >= 40 && quality.brightness <= 215 && quality.variance >= 200;
-    if (good && !autoFired.current) {
-      autoFired.current = true;
-      setTimeout(() => doCapture(), 400);
-    } else if (!good) {
-      autoFired.current = false;
-    }
-  });
+    if (!good) { autoFiredRef.current = false; return; }
+    if (!autocapture || autoFiredRef.current || review) return;
+    autoFiredRef.current = true;
+    const t = setTimeout(async () => {
+      const img = capture();
+      if (img) { const q = await checkImageQuality(img); setReview(img); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [good, autocapture, review, capture]);
 
-  const doCapture = () => {
-    setFlash(true);
-    setTimeout(() => setFlash(false), 280);
-    setTimeout(async () => {
-      const d = capture();
-      if (!d) return;
-      const q = await checkImageQuality(d);
-      if (phase === "front-cam") { setFrontImg(d); setFrontQ(q); setPhase("front-review"); }
-      else { setBackImg(d); setBackQ(q); setPhase("back-review"); }
-    }, 80);
+  const doCapture = async () => {
+    const img = capture();
+    if (img) { const q = await checkImageQuality(img); setReview(img); }
   };
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    const d = await fileToDataUrl(f); e.target.value = "";
-    const q = await checkImageQuality(d);
-    if (phase === "front-cam") { setFrontImg(d); setFrontQ(q); setPhase("front-review"); }
-    else { setBackImg(d); setBackQ(q); setPhase("back-review"); }
+  const doFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = await fileToDataUrl(file);
+    setReview(url);
   };
 
-  const isPassport = docTypeVal === "passport";
-  const isCapturing = phase === "front-cam" || phase === "back-cam";
-  const isFront     = phase === "front-cam" || phase === "front-review";
-  const reviewImg   = phase === "front-review" ? frontImg : backImg;
-  const reviewQ     = phase === "front-review" ? frontQ : backQ;
-
-  // ── Camera permission denied ──
-  if (status === "denied" && isCapturing) {
+  if (status === "denied") {
     return (
-      <div style={{ minHeight: "100vh", background: BG, display: "flex", flexDirection: "column" }}>
-        <TopBar onBack={onBack} onClose={onClose} progress={0} />
-        <div style={{ flex: 1, padding: "24px 20px" }}>
-          <div style={{
-            background: CARD, borderRadius: 16, border: `1px solid ${BORDER}`,
-            padding: "32px 20px", textAlign: "center",
-          }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>📷</div>
-            <h3 style={{ fontSize: 18, fontWeight: 600, color: INK, margin: "0 0 8px" }}>
-              Camera access required
-            </h3>
-            <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 20px" }}>
-              Allow camera access to photograph your {docLabel.toLowerCase()}. Check your browser settings and reload.
-            </p>
-            <input ref={libRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <Btn onClick={() => { try { window.location.href = "app-settings:"; } catch { /**/ } }}>
-                Open settings
-              </Btn>
-              <Btn variant="outline" onClick={() => libRef.current?.click()}>
-                Upload from library
-              </Btn>
-            </div>
+      <div style={{ background: BG, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <TopBar onBack={onBack} onClose={onClose} dark />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📷</div>
+          <h3 style={{ fontSize: 20, fontWeight: 700, color: INK_D, margin: "0 0 8px" }}>Camera access needed</h3>
+          <p style={{ fontSize: 14, color: INK_D3, margin: "0 0 28px", lineHeight: 1.55 }}>
+            Allow camera access in settings, or upload a photo instead.
+          </p>
+          <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 10 }}>
+            <DarkBtn onClick={() => fileRef.current?.click()}>Upload photo</DarkBtn>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={doFile} />
+            <DarkBtn variant="ghost" onClick={() => window.location.reload()}>Retry camera</DarkBtn>
           </div>
         </div>
       </div>
     );
   }
 
-  // ── Review phase ──
-  if ((phase === "front-review" || phase === "back-review") && reviewImg) {
-    const isBackReview = phase === "back-review";
+  if (review) {
     return (
-      <div style={{ minHeight: "100vh", background: BG, display: "flex", flexDirection: "column" }}>
-        <TopBar onBack={() => { setPhase(isBackReview ? "back-cam" : "front-cam"); setCamKey((k) => k + 1); }} onClose={onClose} progress={0} />
-        <div style={{ flex: 1, padding: "20px 20px 0", display: "flex", flexDirection: "column" }}>
-          <div style={{
-            padding: "8px 14px", borderRadius: 999, background: SURFACE,
-            border: `1px solid ${BORDER}`, display: "inline-flex", alignSelf: "center",
-            marginBottom: 16,
-          }}>
-            <span style={{ fontSize: 13, color: INK_3, fontWeight: 500 }}>
-              Make sure all the info on your ID is clear and visible.
-            </span>
-          </div>
-
-          {reviewQ && (
-            <div style={{
-              display: "flex", gap: 10, alignItems: "flex-start",
-              padding: "10px 14px", borderRadius: 12, background: WARN_L,
-              border: `1px solid rgba(217,119,6,0.3)`, marginBottom: 12,
-            }}>
-              <span style={{ fontSize: 14 }}>⚠️</span>
-              <p style={{ fontSize: 13, color: "#d97706", margin: 0, lineHeight: 1.45 }}>{reviewQ}</p>
-            </div>
-          )}
-
-          <div style={{ flex: 1, position: "relative", borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
-            <img src={reviewImg} alt="Captured" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-            <div style={{
-              position: "absolute", top: 10, right: 10,
-              display: "flex", gap: 5, padding: "5px 10px", borderRadius: 999,
-              background: "rgba(22,163,74,0.85)", color: "#fff", fontSize: 11, fontWeight: 600,
-            }}>
-              ✓ Captured
-            </div>
-          </div>
-
-          {/* Label card */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 10,
-            padding: "12px 16px", borderRadius: 12, background: CARD,
-            border: `1px solid ${BORDER}`, marginBottom: 20,
-          }}>
-            <DocIcon color={BRAND} />
-            <span style={{ fontSize: 13, fontWeight: 500, color: INK_2 }}>
-              {docLabel}{isBackReview ? " (back)" : isFront ? " (front)" : ""}
-            </span>
+      <div style={{ background: BG, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <TopBar onClose={onClose} dark />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 20px" }}>
+          <p style={{ fontSize: 14, color: INK_D3, margin: "0 0 16px", textAlign: "center" }}>
+            Check the photo is clear and readable
+          </p>
+          <div style={{ borderRadius: 12, overflow: "hidden", width: "100%", maxWidth: 360 }}>
+            <img src={review} alt="Captured document" style={{ width: "100%", display: "block" }} />
           </div>
         </div>
-
-        <div style={{ padding: "0 20px 32px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <Btn onClick={() => {
-            if (phase === "front-review") {
-              if (hasBack) { setPhase("back-cam"); setCamKey((k) => k + 1); }
-              else onComplete(frontImg!, frontQ, null, null);
-            } else {
-              onComplete(frontImg!, frontQ, backImg!, backQ);
-            }
-          }}>
-            {phase === "front-review" && hasBack ? "Continue to back" : "Upload this photo"}
-          </Btn>
-          <Btn variant="outline" onClick={() => { setPhase(isBackReview ? "back-cam" : "front-cam"); setCamKey((k) => k + 1); }}>
-            Use different photo
-          </Btn>
+        <div style={{ padding: "0 20px 40px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <DarkBtn onClick={async () => {
+            const q = await checkImageQuality(review);
+            onCapture(review, q);
+          }}>Use this photo</DarkBtn>
+          <DarkBtn variant="ghost" onClick={() => { setReview(null); autoFiredRef.current = false; }}>Retake</DarkBtn>
         </div>
       </div>
     );
   }
 
-  // ── Camera phase ──
-  const goodQuality = quality && quality.brightness >= 40 && quality.brightness <= 215 && quality.variance >= 200;
   return (
-    <div style={{ position: "relative", minHeight: "100vh", background: "#000", overflow: "hidden" }}>
-      {/* Camera feed */}
-      {status === "starting" ? (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg style={{ animation: "spin 0.9s linear infinite" }} width="40" height="40" viewBox="0 0 40 40" fill="none">
-            <circle cx="20" cy="20" r="16" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-            <path d="M20 4a16 16 0 0 1 16 16" stroke={BRAND} strokeWidth="3" strokeLinecap="round" />
-          </svg>
+    <div style={{ background: "#000", minHeight: "100dvh", position: "relative", overflow: "hidden" }}>
+      <video ref={videoRef} playsInline muted autoPlay
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+      {status === "live" && <DocViewfinder isPassport={isPassport} detected={good} />}
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0 }}>
+        <TopBar onBack={onBack} onClose={onClose} dark />
+      </div>
+      <div style={{ position: "absolute", bottom: 160, left: 0, right: 0, display: "flex", justifyContent: "center" }}>
+        <div style={{
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)",
+          borderRadius: 999, padding: "8px 18px", color: INK_D, fontSize: 13, fontWeight: 500,
+          border: `1px solid ${good ? BRAND : "rgba(255,255,255,0.15)"}`, transition: "border-color 0.3s",
+        }}>
+          {status === "starting" ? "Starting camera…" : good ? "Hold still — capturing" : (isFront ? "Position front of document" : "Position back of document")}
         </div>
-      ) : (
-        <video ref={videoRef} autoPlay muted playsInline style={{
-          position: "absolute", inset: 0, width: "100%", height: "100%",
-          objectFit: "cover",
-        }} aria-label="Camera feed" />
-      )}
-
-      <DocViewfinder isPassport={isPassport} detected={!!goodQuality} />
-      <CaptureFlash visible={flash} />
-      <canvas ref={canvasRef} style={{ display: "none" }} aria-hidden="true" />
-
-      {/* Top controls */}
-      <div style={{
-        position: "absolute", top: 0, left: 0, right: 0,
-        padding: "14px 20px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: "linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%)",
-      }}>
-        <button type="button" onClick={onBack} style={{
-          all: "unset", cursor: "pointer",
-          width: 36, height: 36, borderRadius: 8, background: "rgba(0,0,0,0.4)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M10 3L5 8l5 5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-
-        {/* Autocapture toggle */}
-        <button type="button" onClick={() => { setAutocapture((a) => !a); autoFired.current = false; }} style={{
-          all: "unset", cursor: "pointer", boxSizing: "border-box",
-          display: "flex", alignItems: "center", gap: 7,
-          padding: "6px 12px", borderRadius: 999,
-          background: autocapture ? BRAND_L : "rgba(0,0,0,0.4)",
-          border: `1px solid ${autocapture ? BRAND : "rgba(255,255,255,0.2)"}`,
-          fontSize: 12, fontWeight: 600, color: autocapture ? BRAND : "rgba(255,255,255,0.7)",
-          transition: "all 0.15s",
-        }}>
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: autocapture ? BRAND : "rgba(255,255,255,0.4)",
-            animation: autocapture ? "ring-pulse 1.4s ease-out infinite" : "none",
-          }} />
-          Autocapture
-        </button>
-
-        <button type="button" onClick={onClose} style={{
-          all: "unset", cursor: "pointer",
-          width: 36, height: 36, borderRadius: 8, background: "rgba(0,0,0,0.4)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-        </button>
       </div>
-
-      {/* Instruction pill */}
-      <div style={{
-        position: "absolute", top: "12%", left: 0, right: 0,
-        display: "flex", justifyContent: "center", padding: "0 24px",
-      }}>
-        <PillLabel>
-          {phase === "front-cam"
-            ? (isPassport ? "Open to the photo page" : `Front of your ${docLabel.toLowerCase()}`)
-            : `Back of your ${docLabel.toLowerCase()}`}
-        </PillLabel>
-      </div>
-
-      {/* Quality hint */}
-      {status === "live" && quality && (
-        <div style={{ position: "absolute", bottom: 120, left: 0, right: 0, display: "flex", justifyContent: "center" }}>
-          <div style={{
-            padding: "6px 14px", borderRadius: 999,
-            background: goodQuality ? "rgba(22,163,74,0.8)" : "rgba(0,0,0,0.55)",
-            fontSize: 12, fontWeight: 600, color: goodQuality ? "#fff" : INK_3,
-            transition: "all 0.25s",
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 20px 48px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 4 }}>
+          <span style={{ fontSize: 13, color: INK_D3 }}>Auto-capture</span>
+          <button onClick={() => setAuto((v) => !v)} style={{
+            all: "unset", width: 40, height: 22, borderRadius: 11,
+            background: autocapture ? BRAND : "rgba(255,255,255,0.15)",
+            position: "relative", cursor: "pointer", transition: "background 0.2s",
           }}>
-            {quality.brightness < 40 ? "Too dark — add light" : quality.brightness > 215 ? "Too bright — reduce glare" : quality.variance < 200 ? "Hold still" : "Lighting good"}
-          </div>
+            <span style={{
+              position: "absolute", top: 2, left: autocapture ? 20 : 2,
+              width: 18, height: 18, borderRadius: 9, background: "#fff", transition: "left 0.2s",
+            }} />
+          </button>
         </div>
-      )}
-
-      {/* Upload from library */}
-      <input ref={libRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-      <div style={{
-        position: "absolute", bottom: 20, left: 20, right: 20,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
-        <button type="button" onClick={() => libRef.current?.click()} style={{
-          all: "unset", cursor: "pointer",
-          width: 48, height: 48, borderRadius: 12,
-          background: "rgba(0,0,0,0.45)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <rect x="2" y="3.5" width="16" height="13" rx="2" stroke="rgba(255,255,255,0.7)" strokeWidth="1.5" />
-            <circle cx="6.5" cy="8" r="1.5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.3" />
-            <path d="M2 14l4-4 4 4 3-3 5 5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.3" strokeLinejoin="round" />
-          </svg>
-        </button>
-
-        {/* Capture button */}
-        <button type="button" onClick={doCapture} aria-label="Take photo" style={{
-          all: "unset", cursor: "pointer",
-          width: 72, height: 72, borderRadius: "50%",
-          background: BRAND, border: "4px solid rgba(255,255,255,0.85)",
-          boxShadow: `0 0 0 3px ${BRAND}`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "rgba(255,255,255,0.75)" }} />
-        </button>
-
-        {/* Tips placeholder */}
-        <button type="button" style={{
-          all: "unset", cursor: "pointer",
-          width: 48, height: 48, borderRadius: 12,
-          background: "rgba(0,0,0,0.45)",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <circle cx="9" cy="9" r="7.5" stroke="rgba(255,255,255,0.7)" strokeWidth="1.4" />
-            <path d="M9 8v5M9 6h.01" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>Tips</span>
-        </button>
+        <DarkBtn onClick={doCapture} disabled={status !== "live"}>
+          {isFront ? "Capture front" : "Capture back"}
+        </DarkBtn>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={doFile} />
+        <DarkBtn variant="ghost" onClick={() => fileRef.current?.click()}>Upload from library</DarkBtn>
       </div>
     </div>
   );
 }
 
-// ─── SCREEN: Uploading ────────────────────────────────────────────────────────
 function UploadingScreen() {
   return (
-    <div className="animate-fade-up" style={{ padding: "0 20px 40px" }}>
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32 }}>
       <div style={{
-        background: CARD, borderRadius: R_CARD,
-        border: `1px solid ${BORDER}`, padding: "40px 24px 36px",
-        textAlign: "center",
+        position: "relative", width: 120, height: 80,
+        background: SURFACE, borderRadius: 10, border: `1.5px solid ${BORDER}`,
+        overflow: "hidden", marginBottom: 32, boxShadow: "0 4px 20px rgba(0,0,0,0.06)",
       }}>
-        {/* Animated ID card illustration */}
         <div style={{
-          width: 120, height: 80, borderRadius: 10,
-          background: SURFACE, border: `1.5px solid ${BORDER}`,
-          margin: "0 auto 28px", position: "relative", overflow: "hidden",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <DocIcon color={INK_4} />
-          {/* Scan bar */}
-          <div style={{
-            position: "absolute", left: 0, right: 0, height: 2,
-            background: `linear-gradient(90deg, transparent 0%, ${BRAND} 40%, ${BRAND} 60%, transparent 100%)`,
-            animation: "doc-scan 2s ease-in-out infinite",
-            boxShadow: `0 0 8px ${BRAND}`,
-          }} />
+          position: "absolute", left: 0, right: 0, height: 2,
+          background: `linear-gradient(90deg, transparent, ${BRAND}, transparent)`,
+          boxShadow: `0 0 8px ${BRAND}`,
+          animation: "doc-scan 1.8s ease-in-out infinite",
+        }} />
+        <div style={{ padding: "16px 12px" }}>
+          <div style={{ height: 8, background: BORDER, borderRadius: 3, marginBottom: 6, width: "70%" }} />
+          <div style={{ height: 6, background: BORDER, borderRadius: 3, marginBottom: 4, width: "50%" }} />
+          <div style={{ height: 6, background: BORDER, borderRadius: 3, width: "60%" }} />
         </div>
-
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: INK, letterSpacing: -0.3, margin: "0 0 8px" }}>
-          Uploading your ID...
-        </h2>
-        <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: 0 }}>
-          Hang tight — this may take a few seconds.
-        </p>
       </div>
+      <h3 style={{ fontSize: 20, fontWeight: 700, color: INK, margin: "0 0 8px", textAlign: "center" }}>
+        Uploading document
+      </h3>
+      <p style={{ fontSize: 14, color: INK_3, textAlign: "center", margin: 0 }}>This will only take a moment</p>
     </div>
   );
 }
 
-// ─── SCREEN: Upload Error ─────────────────────────────────────────────────────
 function UploadErrorScreen({ onRetry, onClose }: { onRetry: () => void; onClose: () => void }) {
   const tips = [
-    "Avoid flash — use natural daylight",
-    "Keep all four corners visible",
-    "Move closer if the photo is blurry",
-    "Make sure all text is legible",
+    "Ensure the document is well-lit",
+    "All four corners must be visible",
+    "No blurring or motion",
+    "Remove any protective sleeve",
   ];
   return (
-    <div className="animate-fade-up" style={{ padding: "0 20px 40px" }}>
-      <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 0 8px" }}>
-        <IconBtn onClick={onClose} label="Close">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="rgba(255,255,255,0.7)" strokeWidth="1.8" strokeLinecap="round" />
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      <TopBar onClose={onClose} />
+      <div style={{ flex: 1, padding: "32px 20px" }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: 16,
+          background: DANGER_L, border: "1px solid rgba(220,38,38,0.15)",
+          display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20,
+        }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M12 8v5m0 3h.01" stroke={DANGER} strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="12" r="9" stroke={DANGER} strokeWidth="1.8" />
           </svg>
-        </IconBtn>
-      </div>
-      <div style={{
-        background: CARD, borderRadius: R_CARD,
-        border: `1px solid ${BORDER}`, padding: "32px 24px 28px",
-      }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-          <div style={{ position: "relative" }}>
-            <div style={{ width: 72, height: 56, borderRadius: 8, background: SURFACE, border: `1.5px solid ${BORDER}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <DocIcon color={INK_3} />
-            </div>
-            <div style={{
-              position: "absolute", bottom: -8, right: -8,
-              width: 22, height: 22, borderRadius: "50%",
-              background: DANGER, display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                <path d="M2 2l6 6M8 2L2 8" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-            </div>
-          </div>
         </div>
-
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: INK, textAlign: "center", margin: "0 0 8px" }}>
-          Couldn&apos;t upload your ID
-        </h2>
-        <p style={{ fontSize: 14, color: INK_3, textAlign: "center", margin: "0 0 20px" }}>
-          Try again with these tips:
+        <h3 style={{ fontSize: 22, fontWeight: 700, color: INK, margin: "0 0 8px" }}>
+          Couldn&apos;t read document
+        </h3>
+        <p style={{ fontSize: 14, color: INK_3, margin: "0 0 24px", lineHeight: 1.55 }}>
+          Please try again and make sure:
         </p>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {tips.map((tip) => (
-            <div key={tip} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: BRAND, flexShrink: 0, marginTop: 5 }} />
-              <p style={{ fontSize: 14, color: INK_3, margin: 0, lineHeight: 1.45 }}>{tip}</p>
+            <div key={tip} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "12px 14px", borderRadius: 10, background: SURFACE, border: `1px solid ${BORDER}`,
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: 3, background: BRAND, flexShrink: 0 }} />
+              <span style={{ fontSize: 14, color: INK_2 }}>{tip}</span>
             </div>
           ))}
         </div>
-
+      </div>
+      <div style={{ padding: "0 20px 40px" }}>
         <Btn onClick={onRetry}>Try again</Btn>
       </div>
     </div>
   );
 }
 
-// ─── SCREEN: Selfie Intro ──────────────────────────────────────────────────────
-function SelfieIntroScreen({ onNext, onBack, onClose }: { onNext: () => void; onBack: () => void; onClose: () => void }) {
+function SelfieIntroScreen({ onStart, onBack, onClose }: {
+  onStart: () => void; onBack: () => void; onClose: () => void;
+}) {
+  const tips = ["Look directly at the camera", "Good lighting on your face", "Remove sunglasses"];
   return (
-    <div className="animate-slide-fwd" style={{ padding: "0 20px 40px" }}>
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
       <TopBar onBack={onBack} onClose={onClose} progress={1} />
-      <div style={{ padding: "28px 0 0" }}>
-        {/* Face illustration */}
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
-          <div style={{
-            width: 120, height: 120, borderRadius: "50%",
-            background: BRAND_L, border: `2px solid ${BRAND_G}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 56,
-          }}>
-            🧑
-          </div>
-        </div>
-
-        <h2 style={{ fontSize: 26, fontWeight: 600, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
-          Now, a quick selfie
+      <div style={{ flex: 1, padding: "32px 20px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{
+          width: 100, height: 100, borderRadius: 50,
+          background: BRAND_L, border: `2px solid rgba(15,110,86,0.2)`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          marginBottom: 28, fontSize: 48,
+        }}>🤳</div>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: INK, margin: "0 0 8px", textAlign: "center", letterSpacing: -0.4 }}>
+          Take a selfie
         </h2>
-        <p style={{ fontSize: 15, color: INK_3, lineHeight: 1.6, margin: "0 0 28px" }}>
-          Move your head slowly left and right so we can match it to your ID photo.{" "}
-          <a href="mailto:support@veridianapi.com" style={{ color: BRAND, textDecoration: "none", fontWeight: 500 }}>
-            Need help?
-          </a>
+        <p style={{ fontSize: 14, color: INK_3, margin: "0 0 28px", textAlign: "center", lineHeight: 1.55 }}>
+          We&apos;ll briefly scan to confirm it&apos;s really you
         </p>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-          {[
-            "Good lighting on your face",
-            "Remove glasses if possible",
-            "Look directly at the camera",
-          ].map((tip) => (
-            <div key={tip} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+          {tips.map((tip) => (
+            <div key={tip} style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "12px 14px", borderRadius: 10, background: SURFACE, border: `1px solid ${BORDER}`,
+            }}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="8" r="7" fill={BRAND_L} stroke={BRAND} strokeWidth="1.2" />
-                <path d="M5 8l2 2 4-4" stroke={BRAND} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3 8l4 4 6-6" stroke={BRAND} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <span style={{ fontSize: 14, color: INK_2 }}>{tip}</span>
             </div>
           ))}
         </div>
-
-        <Btn onClick={onNext}>Take selfie</Btn>
+      </div>
+      <div style={{ padding: "0 20px 40px" }}>
+        <Btn onClick={onStart}>Take selfie</Btn>
       </div>
     </div>
   );
 }
 
-// ─── SCREEN: Selfie Camera (liveness) ────────────────────────────────────────
-function SelfieScreen({ onComplete, onBack, onClose }: {
-  onComplete: (img: string, q: string | null) => void;
+function SelfieScreen({ onCapture, onBack, onClose }: {
+  onCapture: (img: string, quality: string | null) => void;
   onBack: () => void; onClose: () => void;
 }) {
+  const { status, videoRef, canvasRef, capture } = useCamera("user");
+  const quality = useFrameQuality(videoRef, status === "live");
   const [liveness, setLiveness]   = useState<LivenessPhase>("framing");
   const [progress, setProgress]   = useState(0);
-  const [image, setImage]         = useState<string | null>(null);
-  const [imageQ, setImageQ]       = useState<string | null>(null);
-  const [flash, setFlash]         = useState(false);
-  const [camKey, setCamKey]       = useState(0);
-  const libRef                    = useRef<HTMLInputElement>(null);
-  const livenessStarted           = useRef(false);
-  const progressRef               = useRef(0);
+  const [review, setReview]       = useState<string | null>(null);
+  const progressRef               = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileRef                   = useRef<HTMLInputElement>(null);
 
-  const { status, videoRef, canvasRef, capture } = useCamera("user");
-  const quality = useFrameQuality(videoRef, status === "live" && liveness === "framing");
+  const good = quality
+    ? quality.brightness >= 40 && quality.brightness <= 215 && quality.variance >= 120
+    : false;
 
-  // Detect "face present" from quality and start liveness
   useEffect(() => {
-    if (liveness !== "framing" || !quality) return;
-    const hasSignal = quality.brightness >= 40 && quality.brightness <= 215 && quality.variance >= 120;
-    if (hasSignal && !livenessStarted.current) {
-      livenessStarted.current = true;
-      setLiveness("checking");
-    }
-  });
-
-  // Liveness progress timer (2.4s to fill)
-  useEffect(() => {
-    if (liveness !== "checking") return;
-    const id = setInterval(() => {
-      progressRef.current = Math.min(progressRef.current + 4, 100);
-      setProgress(progressRef.current);
-      if (progressRef.current >= 100) {
-        clearInterval(id);
-        setTimeout(() => doCapture(), 150);
-      }
+    if (!good || liveness !== "framing") return;
+    setLiveness("checking");
+    setProgress(0);
+    progressRef.current = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 100) { clearInterval(progressRef.current!); return 100; }
+        return p + 4;
+      });
     }, 96);
-    return () => clearInterval(id);
-  }, [liveness]);
+    return () => { if (progressRef.current) clearInterval(progressRef.current); };
+  }, [good, liveness]);
 
-  const doCapture = useCallback(() => {
-    setFlash(true);
-    setTimeout(() => setFlash(false), 280);
-    setTimeout(async () => {
-      const d = capture();
-      if (!d) return;
-      const q = await checkImageQuality(d);
-      setImage(d); setImageQ(q);
-    }, 80);
-  }, [capture]);
+  useEffect(() => {
+    if (progress < 100 || liveness !== "checking") return;
+    setLiveness("done");
+    const img = capture();
+    if (img) setReview(img);
+  }, [progress, liveness, capture]);
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    const d = await fileToDataUrl(f); e.target.value = "";
-    const q = await checkImageQuality(d);
-    setImage(d); setImageQ(q);
+  useEffect(() => {
+    if (liveness === "checking" && !good) {
+      if (progressRef.current) clearInterval(progressRef.current);
+      setLiveness("framing");
+      setProgress(0);
+    }
+  }, [good, liveness]);
+
+  const doFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = await fileToDataUrl(file);
+    setReview(url);
   };
 
-  // Permission denied
-  if (status === "denied" && !image) {
+  if (status === "denied") {
     return (
-      <div style={{ minHeight: "100vh", background: BG, display: "flex", flexDirection: "column" }}>
-        <TopBar onBack={onBack} onClose={onClose} progress={1} />
-        <div style={{ flex: 1, padding: "24px 20px" }}>
-          <div style={{ background: CARD, borderRadius: 16, border: `1px solid ${BORDER}`, padding: "32px 20px", textAlign: "center" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🤳</div>
-            <h3 style={{ fontSize: 18, fontWeight: 600, color: INK, margin: "0 0 8px" }}>Camera access required</h3>
-            <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 20px" }}>
-              Allow camera access to take your selfie. Check your browser settings.
-            </p>
-            <input ref={libRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <Btn onClick={() => { try { window.location.href = "app-settings:"; } catch { /**/ } }}>Open settings</Btn>
-              <Btn variant="outline" onClick={() => libRef.current?.click()}>Upload from library</Btn>
-            </div>
+      <div style={{ background: BG, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <TopBar onBack={onBack} onClose={onClose} dark />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🤳</div>
+          <h3 style={{ fontSize: 20, fontWeight: 700, color: INK_D, margin: "0 0 8px" }}>Camera access needed</h3>
+          <p style={{ fontSize: 14, color: INK_D3, margin: "0 0 28px", lineHeight: 1.55 }}>
+            Allow camera access or upload a selfie photo.
+          </p>
+          <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 10 }}>
+            <DarkBtn onClick={() => fileRef.current?.click()}>Upload selfie</DarkBtn>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={doFile} />
           </div>
         </div>
       </div>
     );
   }
 
-  // Review captured selfie
-  if (image) {
+  if (review) {
     return (
-      <div style={{ minHeight: "100vh", background: BG, display: "flex", flexDirection: "column" }}>
-        <TopBar onBack={() => { setImage(null); setImageQ(null); setLiveness("framing"); livenessStarted.current = false; progressRef.current = 0; setProgress(0); setCamKey((k) => k + 1); }} onClose={onClose} progress={1} />
-        <div style={{ flex: 1, padding: "20px 20px 0", display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "inline-flex", alignSelf: "center", marginBottom: 16, padding: "8px 16px", borderRadius: 999, background: SURFACE, border: `1px solid ${BORDER}` }}>
-            <span style={{ fontSize: 13, color: INK_3, fontWeight: 500 }}>Check your selfie — face clearly visible?</span>
-          </div>
-          {imageQ && (
-            <div style={{ display: "flex", gap: 10, padding: "10px 14px", borderRadius: 12, background: WARN_L, border: `1px solid rgba(217,119,6,0.3)`, marginBottom: 12 }}>
-              <span style={{ fontSize: 14 }}>⚠️</span>
-              <p style={{ fontSize: 13, color: WARN, margin: 0, lineHeight: 1.45 }}>{imageQ}</p>
-            </div>
-          )}
-          <div style={{ flex: 1, position: "relative", borderRadius: 12, overflow: "hidden", marginBottom: 16 }}>
-            <img src={image} alt="Selfie" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }} />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderRadius: 12, background: CARD, border: `1px solid ${BORDER}`, marginBottom: 20 }}>
-            <span style={{ fontSize: 16 }}>🤳</span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: INK_2 }}>Selfie photo</span>
+      <div style={{ background: BG, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <TopBar onClose={onClose} dark />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <p style={{ fontSize: 14, color: INK_D3, margin: "0 0 20px", textAlign: "center" }}>Review your selfie</p>
+          <div style={{ borderRadius: "50%", overflow: "hidden", width: 200, height: 200, border: `3px solid ${BRAND}` }}>
+            <img src={review} alt="Selfie preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
         </div>
-        <div style={{ padding: "0 20px 32px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <Btn onClick={() => onComplete(image, imageQ)}>Use this photo</Btn>
-          <Btn variant="outline" onClick={() => { setImage(null); setImageQ(null); setLiveness("framing"); livenessStarted.current = false; progressRef.current = 0; setProgress(0); setCamKey((k) => k + 1); }}>
-            Retake selfie
-          </Btn>
+        <div style={{ padding: "0 20px 40px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <DarkBtn onClick={async () => {
+            const q = await checkImageQuality(review);
+            onCapture(review, q);
+          }}>Use this photo</DarkBtn>
+          <DarkBtn variant="ghost" onClick={() => { setReview(null); setLiveness("framing"); setProgress(0); }}>
+            Retake
+          </DarkBtn>
         </div>
       </div>
     );
   }
 
-  // Live camera with liveness overlay
+  const r = 56, circ = 2 * Math.PI * r;
+  const offset = circ * (1 - progress / 100);
+
   return (
-    <div style={{ position: "relative", minHeight: "100vh", background: "#000", overflow: "hidden" }}>
-      {status === "starting" ? (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg style={{ animation: "spin 0.9s linear infinite" }} width="40" height="40" viewBox="0 0 40 40" fill="none">
-            <circle cx="20" cy="20" r="16" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-            <path d="M20 4a16 16 0 0 1 16 16" stroke={BRAND} strokeWidth="3" strokeLinecap="round" />
-          </svg>
-        </div>
-      ) : (
-        <video key={camKey} ref={videoRef} autoPlay muted playsInline style={{
-          position: "absolute", inset: 0, width: "100%", height: "100%",
-          objectFit: "cover", transform: "scaleX(-1)",
-        }} aria-label="Front camera feed" />
-      )}
-
-      <FaceOverlay liveness={liveness} progress={progress} />
-      <CaptureFlash visible={flash} />
-      <canvas ref={canvasRef} style={{ display: "none" }} aria-hidden="true" />
-
-      {/* Top bar */}
-      <div style={{
-        position: "absolute", top: 0, left: 0, right: 0,
-        padding: "14px 20px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: "linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%)",
-      }}>
-        <button type="button" onClick={onBack} style={{ all: "unset", cursor: "pointer", width: 36, height: 36, borderRadius: 8, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M10 3L5 8l5 5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        {liveness === "checking" && (
-          <span style={{ fontSize: 11, fontFamily: MONO, color: INK_3, letterSpacing: 0.5, textTransform: "uppercase" as const }}>
-            Liveness
-          </span>
-        )}
-        <button type="button" onClick={onClose} style={{ all: "unset", cursor: "pointer", width: 36, height: 36, borderRadius: 8, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-        </button>
+    <div style={{ background: "#111", minHeight: "100dvh", position: "relative", overflow: "hidden" }}>
+      <video ref={videoRef} playsInline muted autoPlay
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }} />
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <svg width="130" height="130" style={{ position: "absolute" }}>
+          {liveness === "checking" && (
+            <circle cx="65" cy="65" r={r} fill="none" stroke={BRAND} strokeWidth="3"
+              strokeDasharray={`${circ}`} strokeDashoffset={offset} strokeLinecap="round"
+              style={{ transform: "rotate(-90deg)", transformOrigin: "65px 65px", transition: "stroke-dashoffset 0.1s linear" }}
+            />
+          )}
+          <circle cx="65" cy="65" r="60" fill="none"
+            stroke={liveness === "checking" ? BRAND : "rgba(255,255,255,0.4)"}
+            strokeWidth="2" strokeDasharray="4 3" style={{ transition: "stroke 0.3s" }} />
+        </svg>
       </div>
-
-      {/* Instruction */}
-      <div style={{
-        position: "absolute", bottom: 80, left: 0, right: 0,
-        display: "flex", justifyContent: "center", padding: "0 24px",
-      }}>
-        <PillLabel>
-          {liveness === "framing" ? "Position your face within the frame"
-            : liveness === "checking" ? "Turn your head slowly left and right"
-            : "Verifying..."}
-        </PillLabel>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0 }}>
+        <TopBar onBack={onBack} onClose={onClose} dark />
       </div>
-
-      {/* Liveness progress arc */}
-      {liveness === "checking" && (
+      <div style={{ position: "absolute", bottom: 140, left: 0, right: 0, display: "flex", justifyContent: "center" }}>
         <div style={{
-          position: "absolute", bottom: 20, left: 0, right: 0,
-          display: "flex", justifyContent: "center",
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)",
+          borderRadius: 999, padding: "8px 18px", color: INK_D, fontSize: 13, fontWeight: 500,
+          border: `1px solid ${liveness === "checking" ? BRAND : "rgba(255,255,255,0.15)"}`,
+          transition: "border-color 0.3s",
         }}>
-          <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
-            <circle cx="30" cy="30" r="26" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-            <circle cx="30" cy="30" r="26"
-              stroke={BRAND} strokeWidth="3" strokeLinecap="round"
-              strokeDasharray={`${(progress / 100) * 163.4} 163.4`}
-              transform="rotate(-90 30 30)"
-              style={{ transition: "stroke-dasharray 0.1s linear" }} />
-            <text x="30" y="35" textAnchor="middle" fontSize="12" fontWeight="600" fill={BRAND} fontFamily="sans-serif">
-              {progress}%
-            </text>
-          </svg>
+          {liveness === "framing"
+            ? (good ? "Hold still…" : "Center your face")
+            : liveness === "checking"
+            ? "Checking liveness…"
+            : "Complete!"}
         </div>
-      )}
+      </div>
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 20px 48px" }}>
+        <DarkBtn onClick={() => { const img = capture(); if (img) setReview(img); }} disabled={status !== "live"}>
+          Take selfie
+        </DarkBtn>
+      </div>
     </div>
   );
 }
-
-// ─── SCREEN: Processing ────────────────────────────────────────────────────────
-const PROC_STEPS = [
-  { label: "Applicant data",      icon: "👤" },
-  { label: "Identity document",   icon: "🪪" },
-  { label: "Selfie",              icon: "🤳" },
-];
 
 function ProcessingScreen({ step }: { step: number }) {
+  const items = [
+    "Checking document authenticity",
+    "Matching face to document",
+    "Running compliance checks",
+  ];
   return (
-    <div className="animate-fade-up" style={{ padding: "0 20px 40px" }}>
-      <div style={{ background: CARD, borderRadius: R_CARD, border: `1px solid ${BORDER}`, padding: "36px 24px 28px" }}>
-        {/* Hourglass */}
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: "50%",
-            background: SURFACE, border: `1px solid ${BORDER}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 28,
-            animation: "veridian-hourglass 2s ease-in-out infinite",
-          }}>
-            ⏳
-          </div>
-        </div>
-
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: INK, textAlign: "center", margin: "0 0 6px" }}>
-          Checking your data
-        </h2>
-        <p style={{ fontSize: 14, color: INK_3, textAlign: "center", margin: "0 0 24px", lineHeight: 1.5 }}>
-          The verification status will update automatically.
-        </p>
-
-        {/* Status checklist */}
-        <div style={{ borderRadius: 16, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-          {PROC_STEPS.map(({ label, icon }, i) => {
-            const done   = i < step;
-            const active = i === step;
-            const pend   = i > step;
-            return (
-              <div key={label} style={{
-                display: "flex", alignItems: "center", gap: 14,
-                minHeight: 52, padding: "0 16px",
-                borderBottom: i < PROC_STEPS.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none",
-                opacity: pend ? 0.45 : 1,
-                transition: "opacity 0.25s",
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 24px" }}>
+      <div style={{
+        width: 72, height: 72, borderRadius: 20,
+        background: BRAND_L, border: `1px solid rgba(15,110,86,0.2)`,
+        display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 28,
+      }}>
+        <svg width="32" height="36" viewBox="0 0 32 36" fill="none"
+          style={{ animation: "veridian-hourglass 2s ease-in-out infinite" }}>
+          <path d="M6 2h20v8L16 18 6 10V2Z" fill={BRAND} opacity="0.6" />
+          <path d="M6 34h20v-8L16 18 6 26v8Z" fill={BRAND} />
+          <rect x="4" y="1" width="24" height="4" rx="2" fill={BRAND} />
+          <rect x="4" y="31" width="24" height="4" rx="2" fill={BRAND} />
+        </svg>
+      </div>
+      <h3 style={{ fontSize: 22, fontWeight: 700, color: INK, margin: "0 0 8px", textAlign: "center", letterSpacing: -0.4 }}>
+        Verifying identity
+      </h3>
+      <p style={{ fontSize: 14, color: INK_3, margin: "0 0 32px", textAlign: "center" }}>
+        Please wait — this takes 10–20 seconds
+      </p>
+      <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+        {items.map((item, i) => {
+          const done   = i < step;
+          const active = i === step;
+          return (
+            <div key={item} style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "14px 16px", borderRadius: 12,
+              background: done ? BRAND_L : SURFACE,
+              border: `1px solid ${done ? "rgba(15,110,86,0.2)" : BORDER}`,
+              transition: "all 0.3s",
+            }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: 12, flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: done ? BRAND : "transparent",
+                border: active ? `2px solid ${BRAND}` : done ? "none" : `2px solid ${BORDER}`,
+                transition: "all 0.3s",
               }}>
-                <span style={{ fontSize: 18, flexShrink: 0 }}>{icon}</span>
-                <span style={{ flex: 1, fontSize: 14, fontWeight: done || active ? 500 : 400, color: done || active ? INK : INK_3 }}>
-                  {label}
-                </span>
                 {done ? (
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <circle cx="9" cy="9" r="8" fill={OK_L} />
-                    <path d="M5.5 9l2.5 2.5 4.5-5" stroke={OK} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 ) : active ? (
-                  <svg style={{ animation: "spin 1.2s linear infinite" }} width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <circle cx="9" cy="9" r="7" stroke={BORDER} strokeWidth="2" />
-                    <path d="M9 2a7 7 0 0 1 7 7" stroke={BRAND} strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <circle cx="9" cy="9" r="7.5" stroke={BORDER} strokeWidth="1.5" />
-                    <path d="M6 9h6M9 6v6" stroke={INK_4} strokeWidth="1.4" strokeLinecap="round" opacity="0.5" />
-                  </svg>
-                )}
+                  <div style={{
+                    width: 8, height: 8, borderRadius: 4, background: BRAND,
+                    animation: "veridian-pulse-dot 1.2s ease-in-out infinite",
+                  }} />
+                ) : null}
               </div>
-            );
-          })}
-        </div>
+              <span style={{ fontSize: 14, fontWeight: active ? 600 : 400, color: done ? BRAND : active ? INK : INK_3 }}>
+                {item}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ─── SCREEN: Result ────────────────────────────────────────────────────────────
-function ResultScreen({ result, onRetry }: { result: VerificationResult; onRetry: () => void }) {
-  return (
-    <div className="animate-fade-up" style={{ padding: "0 20px 40px" }}>
-      <div style={{ background: CARD, borderRadius: R_CARD, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
-        {result.success ? (
-          <>
-            {/* Green gradient banner */}
-            <div style={{
-              background: `linear-gradient(135deg, ${BRAND} 0%, ${BRAND_D} 100%)`,
-              padding: "40px 24px 36px", display: "flex", justifyContent: "center",
-            }}>
-              <div className="animate-scale-in" style={{ width: 96, height: 96 }}>
-                <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
-                  <circle cx="48" cy="48" r="44" fill="rgba(255,255,255,0.15)" />
-                  <circle cx="48" cy="48" r="40" stroke="rgba(255,255,255,0.45)" strokeWidth="2" />
-                  <path d="M30 48l13 13 23-25"
-                    stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"
-                    strokeDasharray="58" strokeDashoffset="58" className="animate-check-draw" />
-                </svg>
-              </div>
-            </div>
-            <div style={{ padding: "28px 24px 32px", textAlign: "center" }}>
-              <h2 style={{ fontSize: 26, fontWeight: 600, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
-                Verification complete
-              </h2>
-              <p style={{ fontSize: 15, color: INK_3, lineHeight: 1.6, margin: "0 0 24px" }}>
-                Your identity has been verified. You can close this window.
-              </p>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <rect x="2" y="5.5" width="8" height="5.5" rx="1" stroke={INK_4} strokeWidth="1.1" />
-                  <path d="M4 5.5V4C4 2.6 4.9 1.5 6 1.5S8 2.6 8 4v1.5" stroke={INK_4} strokeWidth="1.1" fill="none" />
-                </svg>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: INK_4, letterSpacing: 0.3 }}>Secured by Veridian</span>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div style={{ padding: "40px 24px 32px", textAlign: "center" }}>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-              <div className="animate-scale-in" style={{ width: 80, height: 80 }}>
-                <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-                  <circle cx="40" cy="40" r="36" fill={DANGER_L} />
-                  <circle cx="40" cy="40" r="32" stroke={DANGER} strokeWidth="2" />
-                  <path d="M26 26l28 28M54 26L26 54" stroke={DANGER} strokeWidth="3" strokeLinecap="round" />
-                </svg>
-              </div>
-            </div>
-            <h2 style={{ fontSize: 24, fontWeight: 600, color: INK, letterSpacing: -0.4, margin: "0 0 10px" }}>
-              Verification unsuccessful
-            </h2>
-            <p style={{ fontSize: 14, color: INK_3, lineHeight: 1.6, margin: "0 0 24px" }}>
-              {result.error ?? "We were unable to verify your identity."}
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <Btn onClick={onRetry}>Try again</Btn>
-              <a href="mailto:support@veridianapi.com" style={{ all: "unset" }}>
-                <Btn variant="outline">Get help</Btn>
-              </a>
-            </div>
+function ResultScreen({ result, onRetry, onClose }: {
+  result: VerificationResult; onRetry: () => void; onClose: () => void;
+}) {
+  if (result.success) {
+    return (
+      <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <div style={{
+          background: `linear-gradient(135deg, ${BRAND} 0%, ${BRAND_D} 100%)`,
+          padding: "64px 24px 40px", textAlign: "center",
+        }}>
+          <div className="animate-scale-in" style={{
+            width: 80, height: 80, borderRadius: 40,
+            background: "rgba(255,255,255,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 16px",
+          }}>
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+              <path className="animate-check-draw" d="M8 20l9 9 15-15"
+                stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                strokeDasharray="56" strokeDashoffset="56" />
+            </svg>
           </div>
-        )}
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: "#fff", margin: "0 0 6px", letterSpacing: -0.5 }}>
+            Verified!
+          </h2>
+          <p style={{ fontSize: 15, color: "rgba(255,255,255,0.8)", margin: 0 }}>
+            Your identity has been confirmed
+          </p>
+        </div>
+        <div style={{ flex: 1, padding: "28px 20px" }}>
+          <div style={{ padding: 20, borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}` }}>
+            <p style={{ fontSize: 14, color: INK_3, margin: 0, lineHeight: 1.6 }}>
+              You can now close this window and return to the app that requested verification.
+            </p>
+          </div>
+        </div>
+        <div style={{ padding: "0 20px 40px" }}>
+          <Btn onClick={onClose}>Close</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: CARD, minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+      <TopBar onClose={onClose} />
+      <div style={{ flex: 1, padding: "32px 20px" }}>
+        <div style={{
+          width: 60, height: 60, borderRadius: 18,
+          background: DANGER_L, border: "1px solid rgba(220,38,38,0.15)",
+          display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20,
+        }}>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <path d="M14 9v7m0 4h.01" stroke={DANGER} strokeWidth="2.2" strokeLinecap="round" />
+            <circle cx="14" cy="14" r="11" stroke={DANGER} strokeWidth="1.8" />
+          </svg>
+        </div>
+        <h3 style={{ fontSize: 22, fontWeight: 700, color: INK, margin: "0 0 8px", letterSpacing: -0.4 }}>
+          Verification failed
+        </h3>
+        <p style={{ fontSize: 14, color: INK_3, margin: 0, lineHeight: 1.55 }}>
+          {result.error ?? "We couldn't verify your identity. Please try again."}
+        </p>
+      </div>
+      <div style={{ padding: "0 20px 40px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <Btn onClick={onRetry}>Try again</Btn>
+        <Btn variant="ghost" onClick={() => { window.location.href = "mailto:support@veridianapi.com"; }}>
+          Get help
+        </Btn>
       </div>
     </div>
   );
@@ -1579,216 +1162,132 @@ function ResultScreen({ result, onRetry }: { result: VerificationResult; onRetry
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export function VerificationFlow({ token }: { token: string }) {
-  const [flowStep, setFlowStep]   = useState<FlowStep>("detecting");
-  const [dir, setDir]             = useState<Direction>("forward");
-  const [country, setCountry]     = useState<Country | null>(null);
-  const [docType, setDocType]     = useState<DocType | null>(null);
-  const [docFront, setDocFront]   = useState<string | null>(null);
-  const [docFrontQ, setDocFrontQ] = useState<string | null>(null);
-  const [docBack, setDocBack]     = useState<string | null>(null);
-  const [docBackQ, setDocBackQ]   = useState<string | null>(null);
-  const [selfie, setSelfie]       = useState<string | null>(null);
-  const [procStep, setProcStep]   = useState(0);
-  const [result, setResult]       = useState<VerificationResult | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [showExit, setShowExit]   = useState(false);
+  const [step, setStep]               = useState<FlowStep>("detecting");
+  const [direction, setDirection]     = useState<Direction>("forward");
+  const [businessName, setBizName]    = useState<string | undefined>();
+  const [showExit, setShowExit]       = useState(false);
+  const [docType, setDocType]         = useState<DocType>("passport");
+  const [docHasBack, setDocHasBack]   = useState(false);
+  const [docPhase, setDocPhase]       = useState<DocPhase>("front-cam");
+  const [frontImg, setFrontImg]       = useState<string | null>(null);
+  const [backImg, setBackImg]         = useState<string | null>(null);
+  const [procStep, setProcStep]       = useState(0);
+  const [result, setResult]           = useState<VerificationResult | null>(null);
+
+  const go = useCallback((next: FlowStep, dir: Direction = "forward") => {
+    setDirection(dir); setStep(next);
+  }, []);
 
   useEffect(() => {
-    const isPhone = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
-    setFlowStep(isPhone ? "welcome" : "entry");
-  }, []);
+    const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+    go(mobile ? "welcome" : "entry");
+  }, [go]);
 
-  const go = useCallback((to: FlowStep, d: Direction = "forward") => {
-    setDir(d); setFlowStep(to);
-  }, []);
+  useEffect(() => {
+    if (step !== "entry") return;
+    const id = setInterval(async () => {
+      const s = await getSession(token);
+      if (!s) return;
+      if (s.business_name) setBizName(s.business_name);
+      if (s.status === "approved" || s.status === "complete" || s.status === "rejected") {
+        setResult({ success: s.status !== "rejected" });
+        go("result");
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [step, token, go]);
 
-  const docInfo  = DOC_TYPES.find((d) => d.value === docType);
-  const docLabel = docInfo?.label ?? "Document";
-  const hasBack  = docInfo?.hasBack ?? false;
+  useEffect(() => {
+    if (step !== "welcome") return;
+    getSession(token).then((s) => { if (s?.business_name) setBizName(s.business_name); });
+  }, [step, token]);
 
-  const handleDocComplete = async (front: string, frontQ: string | null, back: string | null, backQ: string | null) => {
-    setDocFront(front); setDocFrontQ(frontQ);
-    if (back) { setDocBack(back); setDocBackQ(backQ); }
-    go("uploading");
-    await delay(2800);
-    go("selfie-intro");
+  const safeSteps: FlowStep[] = ["detecting", "entry", "welcome", "result"];
+  const handleClose = () => {
+    if (safeSteps.includes(step)) window.close();
+    else setShowExit(true);
   };
 
-  const handleSelfieComplete = (img: string, q: string | null) => {
-    setSelfie(img);
-    handleSubmit(img);
+  const handleDocCapture = async (img: string, q: string | null) => {
+    if (docPhase === "front-cam") {
+      setFrontImg(img);
+      if (docHasBack) { setDocPhase("back-cam"); }
+      else { go("uploading"); await delay(2800); go("selfie-intro"); }
+    } else {
+      setBackImg(img);
+      go("uploading"); await delay(2800); go("selfie-intro");
+    }
   };
 
-  const handleSubmit = async (selfieImg: string) => {
-    if (!docFront || !docType || submitting) return;
-    setSubmitting(true);
+  const handleSelfieCapture = (img: string, _q: string | null) => handleSubmit(img);
+
+  const handleSubmit = async (selfie: string) => {
     go("processing");
-    setProcStep(0);
-    await delay(900);  setProcStep(1);
-    await delay(1050); setProcStep(2);
-    const [res] = await Promise.all([
-      submitVerification(token, {
-        document_front: stripPfx(docFront),
-        ...(docBack ? { document_back: stripPfx(docBack) } : {}),
-        selfie: stripPfx(selfieImg),
-        document_type: docType,
-      }),
-      delay(980),
-    ]);
-    setProcStep(3);
-    await delay(500);
+    await delay(600);  setProcStep(1);
+    await delay(700);  setProcStep(2);
+    await delay(900);  setProcStep(3);
+    const res = await submitVerification(token, {
+      document_type: docType,
+      document_front: frontImg!,
+      ...(backImg ? { document_back: backImg } : {}),
+      selfie,
+    });
     setResult(res);
-    setSubmitting(false);
+    await delay(400);
     go("result");
   };
 
-  const handleClose = () => {
-    const safeSteps: FlowStep[] = ["detecting", "entry", "welcome", "result"];
-    if (safeSteps.includes(flowStep)) {
-      go("welcome");
-    } else {
-      setShowExit(true);
-    }
-  };
-
-  const handleExit = () => {
-    setShowExit(false);
-    setCountry(null); setDocType(null);
-    setDocFront(null); setDocBack(null); setSelfie(null);
-    go("welcome");
-  };
-
-  const handleMobileComplete = useCallback((res: VerificationResult) => {
-    setResult(res); go("result");
-  }, [go]);
+  const animClass = direction === "forward" ? "animate-slide-fwd" : "animate-slide-bwd";
 
   const renderStep = () => {
-    if (flowStep === "detecting") return null;
-
-    if (flowStep === "entry") {
-      return <EntryScreen token={token} onMobileComplete={handleMobileComplete} />;
+    switch (step) {
+      case "detecting": return null;
+      case "entry":
+        return <EntryScreen token={token} businessName={businessName} />;
+      case "welcome":
+        return <WelcomeScreen businessName={businessName} onStart={() => go("country-select")} onClose={handleClose} />;
+      case "country-select":
+        return <CountrySelectScreen onSelect={() => go("doc-type")} onBack={() => go("welcome", "backward")} onClose={handleClose} />;
+      case "doc-type":
+        return <DocTypeScreen
+          onSelect={(dt, hasBack) => { setDocType(dt); setDocHasBack(hasBack); setDocPhase("front-cam"); go("doc-capture"); }}
+          onBack={() => go("country-select", "backward")} onClose={handleClose}
+        />;
+      case "doc-capture":
+        return <DocCaptureScreen
+          docType={docType} phase={docPhase}
+          onCapture={handleDocCapture}
+          onBack={() => go("doc-type", "backward")} onClose={handleClose}
+        />;
+      case "uploading":  return <UploadingScreen />;
+      case "upload-error":
+        return <UploadErrorScreen onRetry={() => { setDocPhase("front-cam"); go("doc-capture"); }} onClose={handleClose} />;
+      case "selfie-intro":
+        return <SelfieIntroScreen onStart={() => go("selfie")} onBack={() => go("doc-capture", "backward")} onClose={handleClose} />;
+      case "selfie":
+        return <SelfieScreen onCapture={handleSelfieCapture} onBack={() => go("selfie-intro", "backward")} onClose={handleClose} />;
+      case "processing": return <ProcessingScreen step={procStep} />;
+      case "result":
+        return <ResultScreen
+          result={result ?? { success: false, error: "Verification was unsuccessful." }}
+          onRetry={() => { setDocPhase("front-cam"); setFrontImg(null); setBackImg(null); go("doc-type"); }}
+          onClose={() => window.close()}
+        />;
+      default: return null;
     }
-
-    if (flowStep === "welcome") {
-      return <WelcomeScreen onNext={() => go("country-select")} />;
-    }
-
-    if (flowStep === "country-select") {
-      return (
-        <CountrySelectScreen
-          value={country}
-          onChange={(c) => { setCountry(c); setDocType(null); }}
-          onNext={() => go("doc-type")}
-          onBack={() => go("welcome", "backward")}
-          onClose={handleClose}
-        />
-      );
-    }
-
-    if (flowStep === "doc-type") {
-      return (
-        <DocTypeScreen
-          country={country}
-          onSelect={(d) => { setDocType(d); go("doc-capture"); }}
-          onBack={() => go("country-select", "backward")}
-          onClose={handleClose}
-        />
-      );
-    }
-
-    if (flowStep === "doc-capture") {
-      return (
-        <DocCaptureScreen
-          docLabel={docLabel}
-          docTypeVal={docType ?? "passport"}
-          hasBack={hasBack}
-          onComplete={handleDocComplete}
-          onBack={() => go("doc-type", "backward")}
-          onClose={handleClose}
-        />
-      );
-    }
-
-    if (flowStep === "uploading") {
-      return <UploadingScreen />;
-    }
-
-    if (flowStep === "upload-error") {
-      return (
-        <UploadErrorScreen
-          onRetry={() => go("doc-capture")}
-          onClose={handleClose}
-        />
-      );
-    }
-
-    if (flowStep === "selfie-intro") {
-      return (
-        <SelfieIntroScreen
-          onNext={() => go("selfie")}
-          onBack={() => go("doc-type", "backward")}
-          onClose={handleClose}
-        />
-      );
-    }
-
-    if (flowStep === "selfie") {
-      return (
-        <SelfieScreen
-          onComplete={handleSelfieComplete}
-          onBack={() => go("selfie-intro", "backward")}
-          onClose={handleClose}
-        />
-      );
-    }
-
-    if (flowStep === "processing") {
-      return <ProcessingScreen step={procStep} />;
-    }
-
-    if (flowStep === "result" && result) {
-      return (
-        <ResultScreen
-          result={result}
-          onRetry={() => {
-            setResult(null); setDocFront(null); setDocBack(null); setSelfie(null);
-            go("welcome");
-          }}
-        />
-      );
-    }
-
-    return null;
   };
 
-  const anim = dir === "forward" ? "animate-slide-fwd" : "animate-slide-bwd";
-  const showTopPadding = !["detecting", "doc-capture", "selfie"].includes(flowStep);
-
   return (
-    <div style={{ minHeight: "100vh", background: BG, display: "flex", flexDirection: "column" }}>
-      <div style={{ width: "100%", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-        <div style={{ flex: 1, paddingTop: showTopPadding ? 20 : 0 }}>
-          <div key={flowStep} className={anim}>
-            {renderStep()}
-          </div>
-        </div>
-
-        {!["detecting", "doc-capture", "selfie", "entry"].includes(flowStep) && (
-          <p style={{
-            textAlign: "center", fontSize: 11, padding: "16px 20px",
-            fontFamily: MONO, color: "rgba(255,255,255,0.08)", letterSpacing: 0.5,
-          }}>
-            Secured by Veridian · End-to-end encrypted
-          </p>
-        )}
+    <>
+      <div key={step} className={animClass} style={{ minHeight: "100dvh" }}>
+        {renderStep()}
       </div>
-
       {showExit && (
         <ExitDialog
           onContinue={() => setShowExit(false)}
-          onExit={handleExit}
+          onExit={() => { setShowExit(false); window.close(); }}
         />
       )}
-    </div>
+    </>
   );
 }
